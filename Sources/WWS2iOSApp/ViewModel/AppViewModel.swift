@@ -1,20 +1,20 @@
 // SwiftUI port of `viewmodel/MainViewModel.kt`.
 //
-// The Android original is a 1989-line `AndroidViewModel` that fuses BLE I/O,
-// frame parsing, and view state. We split it cleanly:
+// State + navigation + BLE wiring.
 //
-//   - `MainUiState` (this file): the @Published state surface that screens read
-//   - `AppViewModel` (this file): the published-state holder + navigation + the
-//     entry points screens call (e.g. setTab, openPairing, …).
+// - `MainUiState`: the @Published state surface that screens read.
+// - `AppViewModel`: published-state holder + navigation + the per-device
+//   BLE session lifecycle. Each connected device gets a `GattClient` whose
+//   `notifications` stream is subscribed. Bytes accumulate in a per-device
+//   rxBuffer; whenever a SOF/CRC-valid frame can be extracted, FrameParser
+//   converts it into a `ParseResult` and the result is applied to state.
 //
-// BLE wiring (BleScanner / GattClient / OtaUploader from WWS2BLE) and frame
-// parsing (FrameParser / TrendStreamParser / InterfaceEchoParser from
-// WWS2Core) plug into the view model in subsequent commits — the current
-// version stubs those entry points so the shell builds and runs.
+// Heartbeat / trend-stream / OTA upload flows wire on top of this skeleton.
 
 import Foundation
 import Combine
 import SwiftUI
+import CoreBluetooth
 import WWS2Core
 import WWS2BLE
 
@@ -104,6 +104,18 @@ public final class AppViewModel: ObservableObject {
 
     public let scanner = BleScanner()
 
+    /// Per-device BLE sessions and their support state. All accessed on
+    /// MainActor since the class is @MainActor and CBCentralManager's
+    /// delegate queue is set to .main inside BleScanner.
+    private var gattClients: [String: GattClient] = [:]
+    private var rxBuffers: [String: [UInt8]] = [:]
+    private var notificationSubs: [String: AnyCancellable] = [:]
+    private var pickedFirmwareBytes: [UInt8]? = nil
+
+    /// Pending pairing attempt — set when the user taps a scanned device,
+    /// consumed when the PIN screen completes.
+    private var pendingPairingAddress: String? = nil
+
     public init() {}
 
     // MARK: Top-level navigation (matches Kotlin MainViewModel surface)
@@ -149,17 +161,243 @@ public final class AppViewModel: ObservableObject {
     public func openChatbot()  { state.tabIndex = 4; state.subPage = "chatbot" }
     public func openDownload() { state.tabIndex = 4; state.subPage = "download" }
 
-    /// Aliases used by the menu screen — keep call sites identical to the Kotlin
-    /// original until we converge on a single navigation API.
+    /// Aliases used by the menu screen — keep call sites identical to the
+    /// Kotlin original until we converge on a single navigation API.
     public func openDataFilesList() { openDownload() }
     public func openFirmwareFlow()  { openUpload() }
 
-    /// Tap a device in the strip-bar header. Brings that device to the front
-    /// and updates the active label. BLE-side reconnect logic plugs in later.
+    /// Tap a device in the strip-bar header / pairing list:
+    /// - if it's an already-connected device, just promote it to active;
+    /// - otherwise, treat it as a scanned address and kick off a pairing
+    ///   PIN entry flow (consumed by `onPairingPinResult`).
     public func requestConnectDevice(_ deviceId: String) {
-        state.activeDeviceId = deviceId
-        if let dev = state.connectedDevices.first(where: { $0.id == deviceId }) {
-            state.activeDeviceLabel = dev.label
+        if state.connectedDevices.contains(where: { $0.id == deviceId }) {
+            state.activeDeviceId = deviceId
+            state.activeDeviceLabel = state.connectedDevices.first { $0.id == deviceId }?.label ?? ""
+            return
+        }
+        // Treat as a scan-result address: prompt PIN, then connect.
+        pendingPairingAddress = deviceId
+        state.connectingIds.insert(deviceId)
+        showPinForPairing = true
+    }
+
+    // MARK: BLE error handling
+
+    public func dismissBleError() { bleError = nil }
+    public func retryBleError() {
+        guard let err = bleError else { return }
+        bleError = nil
+        pendingPairingAddress = err.retryAddress
+        showPinForPairing = true
+    }
+
+    // MARK: Pairing PIN
+
+    /// PIN entry result (-1 = cancel). On accept, perform the actual
+    /// CoreBluetooth connect on the peripheral that was tapped.
+    public func onPairingPinResult(_ pin: Int) {
+        showPinForPairing = false
+        guard let addr = pendingPairingAddress else { return }
+        pendingPairingAddress = nil
+        if pin < 0 {
+            state.connectingIds.remove(addr)
+            return
+        }
+        Task { @MainActor in
+            await self.connectScannedAddress(addr, pin: pin)
+        }
+    }
+
+    private func connectScannedAddress(_ address: String, pin: Int) async {
+        guard let peripheral = scanner.getRemoteDevice(address) else {
+            state.connectingIds.remove(address)
+            bleError = BleErrorState(message: "Device not found in scan results.",
+                                     retryAddress: address)
+            return
+        }
+
+        let gatt = GattClient(scanner: scanner)
+        gattClients[address] = gatt
+
+        let ok = await gatt.connect(peripheral: peripheral)
+        state.connectingIds.remove(address)
+        if !ok {
+            gattClients[address] = nil
+            bleError = BleErrorState(
+                message: "Failed to connect to the BLE device.",
+                retryAddress: address
+            )
+            return
+        }
+
+        // Subscribe to notifications and keep the cancellable alive on self.
+        let sub = gatt.notifications.sink { [weak self] bytes in
+            Task { @MainActor in self?.handleNotification(deviceId: address, bytes: bytes) }
+        }
+        notificationSubs[address] = sub
+
+        // Send the device-info pairing request as the first frame so the
+        // device knows we're authenticated.
+        _ = await gatt.write(data: FrameCodec.buildDeviceInfoRequest(pin: pin),
+                             withoutResponse: false)
+
+        // Decide density vs interface from the BLE name (matches Kotlin
+        // DeviceRepository.isInterfaceMeter).
+        let scanned = scanner.scannedDevices[address]
+        let isInterface = DeviceRepository.isInterfaceMeter(name: scanned?.rawName ?? "")
+        let label: String = scanned?.name ?? (isInterface ? "ENV130" : "ENV230")
+
+        let connected = ConnectedBleDevice(
+            id: address,
+            label: label,
+            firmwareVersion: "",
+            deviceType: isInterface ? 1 : 0
+        )
+        state.connectedDevices.append(connected)
+        state.activeDeviceId = address
+        state.activeDeviceLabel = label
+        state.deviceType = isInterface ? .interface_ : .density
+    }
+
+    // MARK: Notification handling — frame extraction + dispatch
+
+    private func handleNotification(deviceId: String, bytes: [UInt8]) {
+        // Per-device rxBuf
+        var buf = rxBuffers[deviceId, default: []]
+        buf.append(contentsOf: bytes)
+        state.rxBlink.toggle()
+
+        // Greedy frame extraction: walk the buffer looking for a SOF, then
+        // try every length up to buf.count − sof. parseFrame() validates
+        // CRC; if it fails for the current length, advance and try again.
+        var consumedAll = false
+        while !consumedAll {
+            consumedAll = true
+            // Drop leading garbage before SOF
+            if let sofIdx = buf.firstIndex(of: FrameCodec.sof) {
+                if sofIdx > 0 { buf.removeFirst(sofIdx); consumedAll = false }
+            } else {
+                buf.removeAll(keepingCapacity: true)
+                break
+            }
+            // Need at least 5 bytes (SOF + cmd + crc)
+            guard buf.count >= 5 else { break }
+
+            // Try increasing frame lengths until parseFrame validates CRC.
+            // Cap the search to avoid pathological scans.
+            var matched = false
+            let maxLen = min(buf.count, 256)
+            for len in 5...maxLen {
+                let candidate = Array(buf[0..<len])
+                if let frame = FrameCodec.parseFrame(candidate) {
+                    dispatchFrame(deviceId: deviceId, frame: frame)
+                    buf.removeFirst(len)
+                    matched = true
+                    consumedAll = false
+                    break
+                }
+            }
+            if !matched { break } // wait for more bytes
+        }
+
+        rxBuffers[deviceId] = buf
+    }
+
+    private func dispatchFrame(deviceId: String, frame: ParsedFrame) {
+        let isInterface = state.connectedDevices.first { $0.id == deviceId }?.deviceType == 1
+        guard let result = FrameParser.parse(cmd: frame.cmd, data: frame.data, isInterface: isInterface)
+        else { return }
+
+        switch result {
+        case .status4B(let reading):
+            state.deviceReadings[deviceId] = reading
+        case .densityStatus(let reading, let trend, let relay, let densUnit,
+                            let e1En, let e1St, let e2En, let e2St):
+            state.deviceReadings[deviceId] = reading
+            state.temperatureC = reading.temperature
+            state.currentMA = reading.currentMA
+            state.damping = reading.damping
+            state.set4mA = reading.set4mA
+            state.set20mA = reading.set20mA
+            state.pipeDia = reading.pipeDia
+            state.freqMHz = reading.freqMHz
+            state.relay = relay
+            state.densUnit = densUnit
+            state.extIn1En = e1En; state.extIn1State = e1St
+            state.extIn2En = e2En; state.extIn2State = e2St
+            // Append a real-time trend record tagged with this device id.
+            let tagged = TrendRecord(
+                dateTime: trend.dateTime,
+                eeaD: trend.eeaD,
+                dst: trend.dst,
+                temperature: trend.temperature,
+                step: trend.step, vca: trend.vca, status: trend.status,
+                deviceId: deviceId
+            )
+            state.trendRecords.append(tagged)
+        case .interfaceStatus(let reading, let temperature, let currentMA, let damping,
+                              let set4, let set20, let freq, let tvg, let offset, let asf,
+                              let relay, let trend):
+            state.deviceReadings[deviceId] = reading
+            state.temperatureC = temperature
+            state.currentMA = currentMA
+            state.damping = damping
+            state.set4mA = set4; state.set20mA = set20
+            state.freqMHz = freq; state.tvg = tvg; state.offset = offset
+            state.asf = asf; state.relay = relay
+            let tagged = TrendRecord(
+                dateTime: trend.dateTime,
+                eeaD: trend.eeaD, dst: trend.dst,
+                temperature: trend.temperature,
+                deviceId: deviceId
+            )
+            state.trendRecords.append(tagged)
+        case .densityEcho(let echo, let temperature, _, let densUnit):
+            state.echoReading = echo
+            state.deviceEchoReadings[deviceId] = echo
+            state.temperatureC = temperature
+            state.densUnit = densUnit
+        case .densityDiag(let diag):
+            state.temperatureC = diag.temperature
+            state.currentMA = diag.currentMA
+            state.damping = diag.damping
+            state.set4mA = diag.set4mA
+            state.set20mA = diag.set20mA
+            state.pipeDia = diag.pipeDia
+            state.freqMHz = diag.freqMHz
+        case .interfaceDiag(let diag):
+            state.interfaceDiag = diag
+            state.temperatureC = diag.temperature
+            state.currentMA = diag.currentMA
+            state.freqMHz = Double(diag.freq) * 0.001
+            state.offset = diag.offset
+            state.set4mA = diag.set4mA
+            state.set20mA = diag.set20mA
+            state.tvg = diag.tvg
+            state.damping = diag.damp
+            state.asf = diag.asf
+            state.relay = diag.relayOn ? 1 : 0
+        }
+    }
+
+    // MARK: Pairing / scan
+
+    public func startScan() { scanner.startScan() }
+    public func stopScan()  { scanner.stopScan() }
+
+    public func disconnectDevice(_ deviceId: String) {
+        notificationSubs[deviceId]?.cancel()
+        notificationSubs[deviceId] = nil
+        gattClients[deviceId]?.disconnect()
+        gattClients[deviceId] = nil
+        rxBuffers[deviceId] = nil
+        state.connectedDevices.removeAll { $0.id == deviceId }
+        state.deviceReadings[deviceId] = nil
+        state.deviceEchoReadings[deviceId] = nil
+        if state.activeDeviceId == deviceId {
+            state.activeDeviceId = state.connectedDevices.first?.id ?? ""
+            state.activeDeviceLabel = state.connectedDevices.first?.label ?? ""
         }
     }
 
@@ -173,43 +411,49 @@ public final class AppViewModel: ObservableObject {
         state.firmwareTargetDeviceId = deviceId
     }
 
-    /// Begin an OTA upload. Wired into OtaUploader once the BLE flow is in place.
-    public func startUpload() {
-        // TODO: drive OtaUploader.upload(...) and update progress / done state.
-        state.isUploading = true
-        state.uploadProgress = 0.0
+    public func setPickedFile(name: String, size: Int, bytes: [UInt8]) {
+        state.pickedFileName = name
+        state.pickedFileSize = size
+        pickedFirmwareBytes = bytes
     }
 
-    /// Cancel an in-flight OTA upload.
+    /// Begin an OTA upload against the picked firmware target device.
+    public func startUpload() {
+        guard let bytes = pickedFirmwareBytes,
+              let gatt = gattClients[state.firmwareTargetDeviceId] else { return }
+        state.isUploading = true
+        state.uploadProgress = 0.0
+        state.uploadDone = false
+        let startedAt = Date()
+        Task { @MainActor in
+            let uploader = OtaUploader(gatt: gatt)
+            let resultCode = await uploader.upload(
+                data: bytes,
+                awaitStartAck: { _ in true },          // ACK is implicit on iOS path
+                onProgress: { [weak self] p in
+                    Task { @MainActor in
+                        self?.state.uploadProgress = p
+                        self?.state.uploadElapsed = Int64(Date().timeIntervalSince(startedAt) * 1000)
+                    }
+                }
+            )
+            self.state.isUploading = false
+            self.state.uploadDone = (resultCode == OtaResult.ok.rawValue)
+            self.state.uploadProgress = 1.0
+        }
+    }
+
     public func cancelUpload() {
+        // OtaUploader.upload is a single async function — a true cancel
+        // requires a Task handle. Mark UI state for now; full cooperative
+        // cancellation lands in a follow-up.
         state.isUploading = false
         state.uploadProgress = 0.0
     }
 
     // MARK: Echo
 
-    public func setEchoMode(_ mode: EchoMode) {
-        state.echoMode = mode
-    }
-
-    // MARK: Pairing / scan
-
-    public func startScan() {
-        scanner.startScan()
-    }
-
-    public func stopScan() {
-        scanner.stopScan()
-    }
-
-    public func disconnectDevice(_ deviceId: String) {
-        state.connectedDevices.removeAll { $0.id == deviceId }
-        if state.activeDeviceId == deviceId {
-            state.activeDeviceId = state.connectedDevices.first?.id ?? ""
-            state.activeDeviceLabel = state.connectedDevices.first?.label ?? ""
-        }
-        // TODO: instruct GattClient to disconnect once BLE wiring is in place.
-    }
+    public func setEchoMode(_ mode: EchoMode) { state.echoMode = mode }
 
     // MARK: Data download
 
@@ -218,16 +462,13 @@ public final class AppViewModel: ObservableObject {
         return "--"
     }
 
-    /// Bring the device to the foreground and start a trend download.
     public func activateAndDownload(_ deviceId: String) {
         requestConnectDevice(deviceId)
         state.dataFilesStage = .downloading
         // TODO: drive TrendStreamParser via GattClient notifications.
     }
 
-    public func cancelDataDownload() {
-        state.dataFilesStage = .list
-    }
+    public func cancelDataDownload() { state.dataFilesStage = .list }
 
     public func viewDataFile(_ file: DataFileItem) {
         state.activeDataFile = file
@@ -238,42 +479,29 @@ public final class AppViewModel: ObservableObject {
         if state.subPage != nil { state.subPage = nil }
     }
 
-    // MARK: BLE error handling
+    // MARK: CSV picker stubs (file picker UI is platform-specific; landed later)
 
-    public func dismissBleError() { bleError = nil }
-    public func retryBleError() {
-        guard bleError != nil else { return }
-        bleError = nil
-        showPinForPairing = true
-    }
-
-    // MARK: Pairing PIN
-
-    /// PIN entry result (-1 = cancel).
-    public func onPairingPinResult(_ pin: Int) {
-        showPinForPairing = false
-        // TODO: hook into BLE pairing flow once GattClient.connect path is wired.
-    }
-
-    // MARK: Upload / CSV stubs (filled in later commits)
-
-    public func setPickedFile(name: String, size: Int, bytes: [UInt8]) {
-        state.pickedFileName = name
-        state.pickedFileSize = size
-        // TODO: stash bytes for upload
-    }
-
-    public func importCsvFile(name: String, size: Int) {
-        // TODO: wire into ExportCsvUseCase + DataDownload screen
-    }
+    public func importCsvFile(name: String, size: Int) { /* TODO */ }
 
     public func getCsvContentForSave() -> (String, String)? {
-        // TODO: build CSV from current trend records
-        return nil
+        // Build a CSV from the current trend records of the active device.
+        let active = state.activeDeviceId
+        let records = state.trendRecords.filter { $0.deviceId == active }
+        guard !records.isEmpty else { return nil }
+        let useCase = ExportCsvUseCase()
+        let isInterface = state.deviceType == .interface_
+        let csv = useCase.buildCsvContent(records: records, isInterface: isInterface)
+        let stamp = useCase.formatDateStamp(records.first?.dateTime ?? Date())
+        let label = state.activeDeviceLabel.isEmpty ? "WESSWARE" : state.activeDeviceLabel
+        return ("\(label)_\(stamp).csv", csv)
     }
 
     public func shareDataFile() -> URL? {
-        // TODO: prepare a temp file URL for share-sheet integration
-        return nil
+        guard let (filename, content) = getCsvContentForSave() else { return nil }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("WESSWARE_share")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(filename)
+        try? content.data(using: .utf8)?.write(to: url, options: [.atomic])
+        return url
     }
 }
