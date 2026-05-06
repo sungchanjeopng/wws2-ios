@@ -112,6 +112,15 @@ public final class AppViewModel: ObservableObject {
     private var notificationSubs: [String: AnyCancellable] = [:]
     private var pickedFirmwareBytes: [UInt8]? = nil
 
+    /// 1Hz heartbeat task — sends the current page-index frame to the
+    /// active device so it knows what data to push back. Created on
+    /// first connect, cancelled on the last disconnect.
+    private var heartbeatTask: Task<Void, Never>? = nil
+
+    /// Active trend-stream parser (shared across devices since only one
+    /// download flow is active at a time, matching Kotlin behaviour).
+    private var trendParser: TrendStreamParser? = nil
+
     /// Pending pairing attempt — set when the user taps a scanned device,
     /// consumed when the PIN screen completes.
     private var pendingPairingAddress: String? = nil
@@ -258,6 +267,54 @@ public final class AppViewModel: ObservableObject {
         state.activeDeviceId = address
         state.activeDeviceLabel = label
         state.deviceType = isInterface ? .interface_ : .density
+
+        // Spin up the 1Hz heartbeat once we have at least one device.
+        ensureHeartbeatRunning()
+    }
+
+    // MARK: Heartbeat
+
+    /// Map current tab + sub-page → page index used by the heartbeat
+    /// frame (matches firmware Comm_ProcBle PAGE_* constants and the
+    /// CH2 offsets for interface-meter virtual devices).
+    private var currentPageIndex: UInt16 {
+        // Sub-page overrides
+        if let sub = state.subPage {
+            switch sub {
+            case "pairing":  return Command.pagePairing
+            case "upload":   return Command.pageUpload
+            case "download": return Command.pageDownload
+            default:         return Command.pageMenu
+            }
+        }
+        switch state.tabIndex {
+        case 0: return Command.pageStatus
+        case 1: return Command.pageEcho
+        case 2: return Command.pageTrend
+        case 3: return Command.pageMenu
+        case 4: return Command.pageMenu
+        default: return Command.pageStatus
+        }
+    }
+
+    private func ensureHeartbeatRunning() {
+        if heartbeatTask != nil { return }
+        heartbeatTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if self.state.connectedDevices.isEmpty { break }
+                guard let activeId = self.state.connectedDevices.first(where: { $0.id == self.state.activeDeviceId })?.id
+                        ?? self.state.connectedDevices.first?.id,
+                      let gatt = self.gattClients[activeId] else { continue }
+                let frame = FrameCodec.buildHeartbeat(
+                    pageIndex: Int(self.currentPageIndex),
+                    expectedLen: 0
+                )
+                _ = await gatt.write(data: frame, withoutResponse: true)
+            }
+            // Loop exited — if devices reconnect, restart on next connect call.
+            self?.heartbeatTask = nil
+        }
     }
 
     // MARK: Notification handling — frame extraction + dispatch
@@ -267,6 +324,15 @@ public final class AppViewModel: ObservableObject {
         var buf = rxBuffers[deviceId, default: []]
         buf.append(contentsOf: bytes)
         state.rxBlink.toggle()
+
+        // If a trend download is in progress, the parser owns the byte
+        // stream — it walks header → 24-byte records → CRC trailer and
+        // calls our onRecordsParsed/onComplete callbacks.
+        if let parser = trendParser, parser.isActive {
+            parser.tryParse(rxBuf: &buf, downloadedCount: state.downloadRecords.count)
+            rxBuffers[deviceId] = buf
+            return
+        }
 
         // Greedy frame extraction: walk the buffer looking for a SOF, then
         // try every length up to buf.count − sof. parseFrame() validates
@@ -465,10 +531,93 @@ public final class AppViewModel: ObservableObject {
     public func activateAndDownload(_ deviceId: String) {
         requestConnectDevice(deviceId)
         state.dataFilesStage = .downloading
-        // TODO: drive TrendStreamParser via GattClient notifications.
+        state.downloadRecords = []
+        state.dataDownloadProgress = 0
+        state.trendError = nil
+        state.isTrendStreaming = true
+
+        // Build a parser that funnels into download state.
+        let parser = TrendStreamParser(
+            onRecordsParsed: { [weak self] records in
+                Task { @MainActor in
+                    guard let self else { return }
+                    let tagged = records.map {
+                        TrendRecord(
+                            dateTime: $0.dateTime,
+                            eeaD: $0.eeaD, dst: $0.dst, temperature: $0.temperature,
+                            step: $0.step, vca: $0.vca, status: $0.status,
+                            deviceId: deviceId
+                        )
+                    }
+                    self.state.downloadRecords.append(contentsOf: tagged)
+                    let total = max(self.state.trendExpectedRecords, 1)
+                    self.state.dataDownloadProgress =
+                        min(Double(self.state.downloadRecords.count) / Double(total), 1.0)
+                }
+            },
+            onHeaderParsed: { [weak self] total in
+                Task { @MainActor in self?.state.trendExpectedRecords = total }
+            },
+            onComplete: { [weak self] in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.state.isTrendStreaming = false
+                    self.state.dataFilesStage = .complete
+                    self.state.dataDownloadProgress = 1.0
+                    self.persistDownloadedFile(deviceId: deviceId)
+                }
+            },
+            onCrcFail: { _ in false },     // no auto-retry yet
+            onError: { [weak self] msg in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.state.isTrendStreaming = false
+                    self.state.dataFilesStage = .error
+                    self.state.trendError = msg
+                }
+            }
+        )
+        parser.startStream()
+        trendParser = parser
+
+        // Send the trend download command so the device starts streaming.
+        Task { @MainActor in
+            guard let gatt = self.gattClients[deviceId] else { return }
+            let cmd = state.deviceType == .interface_ ? Command.cmdDownloadCh2 : Command.cmdDownload
+            let frame = FrameCodec.buildHeartbeat(pageIndex: Int(cmd))
+            _ = await gatt.write(data: frame, withoutResponse: true)
+        }
     }
 
-    public func cancelDataDownload() { state.dataFilesStage = .list }
+    private func persistDownloadedFile(deviceId: String) {
+        let useCase = ExportCsvUseCase()
+        let label = state.connectedDevices.first { $0.id == deviceId }?.label ?? "WESSWARE"
+        let stamp = useCase.formatDateStamp(Date())
+        let filename = "\(label)_\(stamp).csv"
+        let isInterface = state.deviceType == .interface_
+        _ = useCase.saveCsvToDocuments(
+            fileName: filename,
+            records: state.downloadRecords,
+            isInterface: isInterface
+        )
+        let item = DataFileItem(
+            name: filename,
+            recordCount: state.downloadRecords.count,
+            rangeLabel: "—",
+            sizeBytes: 0,
+            targetDevice: label,
+            chartRecords: state.downloadRecords
+        )
+        state.activeDataFile = item
+        state.savedDataFiles.insert(item, at: 0)
+    }
+
+    public func cancelDataDownload() {
+        trendParser?.reset()
+        trendParser = nil
+        state.isTrendStreaming = false
+        state.dataFilesStage = .list
+    }
 
     public func viewDataFile(_ file: DataFileItem) {
         state.activeDataFile = file
