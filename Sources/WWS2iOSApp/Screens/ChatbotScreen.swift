@@ -114,8 +114,8 @@ public struct ChatbotScreen: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(AppColors.white)
-            .onChange(of: selectedProduct) { _, _ in resetGreeting() }
-            .onChange(of: selectedLang) { _, _ in resetGreeting() }
+            .onChange(of: selectedProduct) { _ in resetGreeting() }
+            .onChange(of: selectedLang) { _ in resetGreeting() }
 
             // Messages
             ScrollViewReader { proxy in
@@ -136,7 +136,7 @@ public struct ChatbotScreen: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 12)
                 }
-                .onChange(of: messages.count) { _, _ in
+                .onChange(of: messages.count) { _ in
                     if let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
