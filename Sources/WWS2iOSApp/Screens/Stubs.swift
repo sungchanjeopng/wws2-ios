@@ -50,16 +50,6 @@ struct StubCard<Content: View>: View {
 
 // DataDownloadScreen ported in Screens/DataDownloadScreen.swift.
 
-public struct ChatbotScreen: View {
-    @ObservedObject var vm: AppViewModel
-    public var body: some View {
-        ScrollView {
-            StubCard(title: "AI Chatbot") {
-                Text("// TODO: port ChatbotScreen.kt (962 lines)")
-                    .font(.caption).foregroundStyle(AppColors.grayLabel)
-            }
-        }
-    }
-}
+// ChatbotScreen ported in Screens/ChatbotScreen.swift.
 
 // PinScreen ported in Screens/PinScreen.swift.
