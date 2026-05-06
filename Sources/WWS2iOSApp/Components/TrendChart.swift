@@ -37,7 +37,8 @@ public struct TrendChart: View {
         .shadow(color: AppColors.cardShadow, radius: 4, y: 2)
     }
 
-    private func draw(context: GraphicsContext, size: CGSize) {
+    private func draw(context ctx: GraphicsContext, size: CGSize) {
+        var context = ctx
         let totalW = size.width
         let totalH = size.height
         let dUnit = DensityUnit.fromInt(densUnit)
