@@ -8,18 +8,7 @@
 import SwiftUI
 import WWS2Core
 
-public struct TrendChart: View {
-    public let records: [TrendRecord]
-    public let densUnit: Int
-    public let tempUnit: Int
-    public init(records: [TrendRecord], densUnit: Int, tempUnit: Int) {
-        self.records = records; self.densUnit = densUnit; self.tempUnit = tempUnit
-    }
-    public var body: some View {
-        ChartPlaceholderBody(title: "Trend Chart", subtitle: "\(records.count) records",
-                             srcFile: "TrendChart.kt (374 lines)")
-    }
-}
+// TrendChart is implemented in Components/TrendChart.swift.
 
 public struct InterfaceTrendChart: View {
     public let records: [TrendRecord]
