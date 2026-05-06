@@ -75,21 +75,8 @@ public struct TrendTabScreen: View {
     }
 }
 
-public struct DiagnosticsTabScreen: View {
-    @ObservedObject var vm: AppViewModel
-    public var body: some View {
-        ScrollView {
-            StubCard(title: "Diagnostics Tab") {
-                Text("Temperature: \(String(format: "%.1f", vm.state.temperatureC))°C")
-                Text("Current: \(String(format: "%.2f", vm.state.currentMA)) mA")
-                Text("// TODO: port DiagnosticsTabScreen.kt (111 lines)")
-                    .font(.caption).foregroundStyle(AppColors.grayLabel)
-            }
-        }
-    }
-}
-
-// MenuTabScreen ported in its own file (Screens/MenuTabScreen.swift).
+// DiagnosticsTabScreen ported in Screens/DiagnosticsTabScreen.swift.
+// MenuTabScreen ported in Screens/MenuTabScreen.swift.
 
 // MARK: - Sub-page stubs (Pairing, Calib, Upload, Download, Chatbot, Pin, BleError)
 
@@ -105,18 +92,7 @@ public struct PairingScreen: View {
     }
 }
 
-public struct CalibScreen: View {
-    @ObservedObject var vm: AppViewModel
-    public var body: some View {
-        ScrollView {
-            StubCard(title: "Calibration") {
-                Text("Points: \(vm.state.calibrationPoints.count)")
-                Text("// TODO: port CalibScreen.kt (130 lines)")
-                    .font(.caption).foregroundStyle(AppColors.grayLabel)
-            }
-        }
-    }
-}
+// CalibScreen ported in Screens/CalibScreen.swift.
 
 public struct UploadScreen: View {
     @ObservedObject var vm: AppViewModel
