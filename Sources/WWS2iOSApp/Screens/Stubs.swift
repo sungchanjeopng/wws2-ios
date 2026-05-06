@@ -62,18 +62,7 @@ public struct EchoTabScreen: View {
     }
 }
 
-public struct TrendTabScreen: View {
-    @ObservedObject var vm: AppViewModel
-    public var body: some View {
-        ScrollView {
-            StubCard(title: "Trend Tab") {
-                Text("Records: \(vm.state.trendRecords.count)")
-                Text("// TODO: port TrendTabScreen.kt (199 lines) + TrendChart.kt (374)")
-                    .font(.caption).foregroundStyle(AppColors.grayLabel)
-            }
-        }
-    }
-}
+// TrendTabScreen ported in Screens/TrendTabScreen.swift.
 
 // DiagnosticsTabScreen ported in Screens/DiagnosticsTabScreen.swift.
 // MenuTabScreen ported in Screens/MenuTabScreen.swift.
@@ -94,19 +83,7 @@ public struct PairingScreen: View {
 
 // CalibScreen ported in Screens/CalibScreen.swift.
 
-public struct UploadScreen: View {
-    @ObservedObject var vm: AppViewModel
-    public var body: some View {
-        ScrollView {
-            StubCard(title: "Firmware Upload") {
-                Text("Picked file: \(vm.state.pickedFileName ?? "—")")
-                Text("Progress: \(Int(vm.state.uploadProgress * 100))%")
-                Text("// TODO: port UploadScreen.kt (229 lines)")
-                    .font(.caption).foregroundStyle(AppColors.grayLabel)
-            }
-        }
-    }
-}
+// UploadScreen ported in Screens/UploadScreen.swift.
 
 public struct DataDownloadScreen: View {
     @ObservedObject var vm: AppViewModel
@@ -134,67 +111,4 @@ public struct ChatbotScreen: View {
     }
 }
 
-public struct PinScreen: View {
-    public let showBack: Bool
-    public let onPinEntered: (Int) -> Void
-    public let onBack: () -> Void
-
-    @State private var input: String = ""
-
-    public init(showBack: Bool, onPinEntered: @escaping (Int) -> Void, onBack: @escaping () -> Void) {
-        self.showBack = showBack
-        self.onPinEntered = onPinEntered
-        self.onBack = onBack
-    }
-
-    public var body: some View {
-        ZStack {
-            AppColors.background.ignoresSafeArea()
-            VStack(spacing: 24) {
-                HStack {
-                    if showBack {
-                        Button(action: onBack) {
-                            Image(systemName: "chevron.left")
-                                .font(.title2)
-                                .foregroundStyle(AppColors.darkText)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-
-                Spacer()
-                Text("Enter PIN")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(AppColors.darkText)
-                TextField("0000", text: $input)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.center)
-                    .font(.system(size: 32, weight: .bold))
-                    .frame(maxWidth: 200)
-                    .padding(.vertical, 12)
-                    .background(AppColors.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                Button(action: {
-                    let pin = Int(input) ?? -1
-                    onPinEntered(pin)
-                }) {
-                    Text("Submit")
-                        .font(.system(size: 17, weight: .bold))
-                        .frame(maxWidth: 200)
-                        .padding(.vertical, 12)
-                        .background(AppColors.primary)
-                        .foregroundStyle(Color.white)
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                Text("// TODO: port PinScreen.kt (187 lines)")
-                    .font(.caption).foregroundStyle(AppColors.grayLabel)
-                Spacer()
-            }
-        }
-    }
-}
+// PinScreen ported in Screens/PinScreen.swift.

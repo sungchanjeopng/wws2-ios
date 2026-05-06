@@ -163,6 +163,29 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: Firmware upload
+
+    public var firmwareTargetLabel: String? {
+        state.connectedDevices.first { $0.id == state.firmwareTargetDeviceId }?.label
+    }
+
+    public func selectFirmwareTarget(_ deviceId: String) {
+        state.firmwareTargetDeviceId = deviceId
+    }
+
+    /// Begin an OTA upload. Wired into OtaUploader once the BLE flow is in place.
+    public func startUpload() {
+        // TODO: drive OtaUploader.upload(...) and update progress / done state.
+        state.isUploading = true
+        state.uploadProgress = 0.0
+    }
+
+    /// Cancel an in-flight OTA upload.
+    public func cancelUpload() {
+        state.isUploading = false
+        state.uploadProgress = 0.0
+    }
+
     public func handleTopBarBack() {
         if state.subPage != nil { state.subPage = nil }
     }
