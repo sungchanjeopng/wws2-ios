@@ -8,6 +8,7 @@
 
 import SwiftUI
 import WWS2Core
+import WWS2BLE
 
 public struct PairingScreen: View {
     @ObservedObject var vm: AppViewModel
