@@ -20,7 +20,7 @@ import CoreBluetooth
 import WWS2Core
 
 @MainActor
-public final class GattClient: NSObject, ObservableObject {
+public final class GattClient: NSObject, ObservableObject, BleSession {
 
     @Published public private(set) var isConnected: Bool = false
 

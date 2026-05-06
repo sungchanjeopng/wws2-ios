@@ -84,6 +84,12 @@ public enum FrameCodec {
     public static func makeStartFrame() -> [UInt8] {
         buildHeartbeat(pageIndex: Int(Command.cmdOtaStart))
     }
+    /// OTA start frame variant that encodes file size (rounded up to KB) in
+    /// the heartbeat payload, matching the legacy BleProtocolService path.
+    public static func makeStartFrame(fileSizeBytes: Int) -> [UInt8] {
+        let sizeKB = (fileSizeBytes + 1023) / 1024
+        return buildHeartbeat(pageIndex: Int(Command.cmdOtaStart), expectedLen: sizeKB)
+    }
     public static func makeEndFrame() -> [UInt8] {
         buildHeartbeat(pageIndex: Int(Command.cmdOtaEnd))
     }
