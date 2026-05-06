@@ -31,36 +31,9 @@ struct StubCard<Content: View>: View {
 
 // MARK: - Top-level tab stubs
 
-public struct MainTabScreen: View {
-    @ObservedObject var vm: AppViewModel
-    public var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                StubCard(title: "Main Tab") {
-                    Text("Active device: \(vm.state.activeDeviceLabel.isEmpty ? "—" : vm.state.activeDeviceLabel)")
-                    Text("Connected devices: \(vm.state.connectedDevices.count)")
-                    Text("// TODO: port app/src/main/java/com/wws2/densitymeter/ui/screen/MainTabScreen.kt (265 lines)")
-                        .font(.caption)
-                        .foregroundStyle(AppColors.grayLabel)
-                }
-            }
-            .padding(.vertical, 16)
-        }
-    }
-}
+// MainTabScreen ported in Screens/MainTabScreen.swift.
 
-public struct EchoTabScreen: View {
-    @ObservedObject var vm: AppViewModel
-    public var body: some View {
-        ScrollView {
-            StubCard(title: "Echo Tab") {
-                Text("Echo level: \(vm.state.echoReading.map { String(format: "%.2f", $0.level) } ?? "—")")
-                Text("// TODO: port EchoTabScreen.kt (232 lines) + EchoChart.kt (324)")
-                    .font(.caption).foregroundStyle(AppColors.grayLabel)
-            }
-        }
-    }
-}
+// EchoTabScreen ported in Screens/EchoTabScreen.swift.
 
 // TrendTabScreen ported in Screens/TrendTabScreen.swift.
 

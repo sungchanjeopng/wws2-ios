@@ -186,6 +186,12 @@ public final class AppViewModel: ObservableObject {
         state.uploadProgress = 0.0
     }
 
+    // MARK: Echo
+
+    public func setEchoMode(_ mode: EchoMode) {
+        state.echoMode = mode
+    }
+
     public func handleTopBarBack() {
         if state.subPage != nil { state.subPage = nil }
     }
