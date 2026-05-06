@@ -36,7 +36,14 @@ public enum FrameCodec {
         let crcReceived = UInt16(frame[5]) | (UInt16(frame[6]) << 8)
         guard crcExpected == crcReceived else { return nil }
 
-        let result = (UInt16(frame[3]) << 8) | UInt16(frame[4])
+        return parsePairingResponse(cmd: cmd, data: Array(frame[3..<5]))
+    }
+
+    public static func parsePairingResponse(cmd: UInt16, data: [UInt8]) -> PairingResult? {
+        guard cmd == Command.cmdDeviceInfo else { return nil }
+        guard data.count >= 2 else { return nil }
+
+        let result = (UInt16(data[0]) << 8) | UInt16(data[1])
         if result == 0x0000 {
             return .success(DeviceInfo(
                 siteNameHi: "?",

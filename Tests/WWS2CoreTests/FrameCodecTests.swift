@@ -66,11 +66,27 @@ final class FrameCodecTests: XCTestCase {
         XCTAssertEqual(info.fwVersion.major, 0)
     }
 
-    func testParsePairingResponsePinFailed() {
-        let payload: [UInt8] = [0x02, 0x00, 0xF0, 0xFF, 0xFF]
-        let crc = Crc.crc16Modbus(payload)
-        let frame = payload + [UInt8(crc & 0xFF), UInt8((crc >> 8) & 0xFF)]
-        XCTAssertEqual(FrameCodec.parsePairingResponse(frame), .pinFailed)
+    func testPairingResponseSuccessAndPinFailed() {
+        let ok = FrameCodec.buildFrame(len: Int(Command.cmdDeviceInfo), data: [0x00, 0x00])
+        let fail = FrameCodec.buildFrame(len: Int(Command.cmdDeviceInfo), data: [0x00, 0x01])
+        XCTAssertEqual(
+            FrameCodec.parsePairingResponse(ok),
+            PairingResult.success(DeviceInfo(siteNameHi: "?", siteNameLo: 0, fwVersion: FwVersion(major: 0, minor: 0, patch: 0)))
+        )
+        XCTAssertEqual(FrameCodec.parsePairingResponse(fail), PairingResult.pinFailed)
+    }
+
+    func testPairingResponseCanBeParsedAfterFrameExtraction() {
+        XCTAssertEqual(
+            FrameCodec.parsePairingResponse(cmd: Command.cmdDeviceInfo, data: [0x00, 0x00]),
+            PairingResult.success(DeviceInfo(siteNameHi: "?", siteNameLo: 0, fwVersion: FwVersion(major: 0, minor: 0, patch: 0)))
+        )
+        XCTAssertEqual(
+            FrameCodec.parsePairingResponse(cmd: Command.cmdDeviceInfo, data: [0x00, 0x01]),
+            PairingResult.pinFailed
+        )
+        XCTAssertNil(FrameCodec.parsePairingResponse(cmd: Command.cmdStatus, data: [0x00, 0x00]))
+        XCTAssertNil(FrameCodec.parsePairingResponse(cmd: Command.cmdDeviceInfo, data: [0x00]))
     }
 
     func testParsePairingResponseRejectsBadCrc() {

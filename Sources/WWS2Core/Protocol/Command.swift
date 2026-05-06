@@ -45,6 +45,7 @@ public enum Command {
     public static let pageStatus:   UInt16 = 0x00
     public static let pageEcho:     UInt16 = 0x01
     public static let pageTrend:    UInt16 = 0x02
+    public static let pageCalib:    UInt16 = 0x03
     public static let pageMenu:     UInt16 = 0x04
     public static let pagePairing:  UInt16 = 0x05
     public static let pageUpload:   UInt16 = 0x06

@@ -120,6 +120,11 @@ public final class AppViewModel: ObservableObject {
     /// Active trend-stream parser (shared across devices since only one
     /// download flow is active at a time, matching Kotlin behaviour).
     private var trendParser: TrendStreamParser? = nil
+    private let interfaceEchoParser = InterfaceEchoParser()
+
+    private var pendingPairingContinuations: [String: CheckedContinuation<PairingResult?, Never>] = [:]
+    private var pendingPairingTimeoutTasks: [String: Task<Void, Never>] = [:]
+    private var uploadTask: Task<Void, Never>? = nil
 
     /// Pending pairing attempt — set when the user taps a scanned device,
     /// consumed when the PIN screen completes.
@@ -180,9 +185,10 @@ public final class AppViewModel: ObservableObject {
     /// - otherwise, treat it as a scanned address and kick off a pairing
     ///   PIN entry flow (consumed by `onPairingPinResult`).
     public func requestConnectDevice(_ deviceId: String) {
-        if state.connectedDevices.contains(where: { $0.id == deviceId }) {
+        if let connected = state.connectedDevices.first(where: { $0.id == deviceId }) {
             state.activeDeviceId = deviceId
-            state.activeDeviceLabel = state.connectedDevices.first { $0.id == deviceId }?.label ?? ""
+            state.activeDeviceLabel = connected.label
+            state.deviceType = connected.deviceType == 1 ? .interface_ : .density
             return
         }
         // Treat as a scan-result address: prompt PIN, then connect.
@@ -240,36 +246,91 @@ public final class AppViewModel: ObservableObject {
             return
         }
 
-        // Subscribe to notifications and keep the cancellable alive on self.
+        // Subscribe to notifications before sending the device-info request so
+        // the pairing response cannot race past us.
         let sub = gatt.notifications.sink { [weak self] bytes in
             Task { @MainActor in self?.handleNotification(deviceId: address, bytes: bytes) }
         }
         notificationSubs[address] = sub
 
-        // Send the device-info pairing request as the first frame so the
-        // device knows we're authenticated.
-        _ = await gatt.write(data: FrameCodec.buildDeviceInfoRequest(pin: pin),
-                             withoutResponse: false)
+        var pairingResult = await requestPairing(gatt: gatt, deviceId: address, pin: pin)
+        if pairingResult == nil {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            pairingResult = await requestPairing(gatt: gatt, deviceId: address, pin: pin)
+        }
 
-        // Decide density vs interface from the BLE name (matches Kotlin
-        // DeviceRepository.isInterfaceMeter).
+        var pairingDeviceInfo: DeviceInfo? = nil
+        switch pairingResult {
+        case .pinFailed:
+            notificationSubs[address]?.cancel()
+            notificationSubs[address] = nil
+            gatt.disconnect()
+            gattClients[address] = nil
+            bleError = BleErrorState(message: "PIN code incorrect.", retryAddress: address)
+            return
+        case .success(let info):
+            pairingDeviceInfo = info
+        case nil:
+            // Android falls back to BLE advertisement parsing on timeout.
+            break
+        }
+
         let scanned = scanner.scannedDevices[address]
-        let isInterface = DeviceRepository.isInterfaceMeter(name: scanned?.rawName ?? "")
-        let label: String = scanned?.name ?? (isInterface ? "ENV130" : "ENV230")
-
-        let connected = ConnectedBleDevice(
-            id: address,
-            label: label,
-            firmwareVersion: "",
-            deviceType: isInterface ? 1 : 0
+        let usedLabels = Set(state.connectedDevices.map(\.label))
+        let routed = DeviceRouting.buildConnectedDevices(
+            address: address,
+            scanned: scanned,
+            pairingDeviceInfo: pairingDeviceInfo,
+            usedLabels: usedLabels
         )
-        state.connectedDevices.append(connected)
-        state.activeDeviceId = address
-        state.activeDeviceLabel = label
-        state.deviceType = isInterface ? .interface_ : .density
+
+        state.connectedDevices.append(contentsOf: routed.devices)
+        state.visibleDeviceIds.formUnion(routed.visibleDeviceIds)
+        state.activeDeviceId = routed.activeDeviceId
+        state.activeDeviceLabel = routed.activeDeviceLabel
+        state.deviceType = routed.deviceType
+
+        // Store the same physical BLE session under Android-compatible virtual
+        // IDs so heartbeat/download/upload paths can address CH1/CH2 directly.
+        for device in routed.devices {
+            gattClients[device.id] = gatt
+        }
 
         // Spin up the 1Hz heartbeat once we have at least one device.
         ensureHeartbeatRunning()
+    }
+
+    private func requestPairing(
+        gatt: GattClient,
+        deviceId: String,
+        pin: Int,
+        timeout: TimeInterval = 3.0
+    ) async -> PairingResult? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<PairingResult?, Never>) in
+            pendingPairingContinuations[deviceId] = continuation
+            pendingPairingTimeoutTasks[deviceId]?.cancel()
+            pendingPairingTimeoutTasks[deviceId] = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                self.completePendingPairing(deviceId: deviceId, result: nil)
+            }
+
+            Task { @MainActor in
+                let wrote = await gatt.write(
+                    data: FrameCodec.buildDeviceInfoRequest(pin: pin),
+                    withoutResponse: false
+                )
+                if !wrote {
+                    self.completePendingPairing(deviceId: deviceId, result: nil)
+                }
+            }
+        }
+    }
+
+    private func completePendingPairing(deviceId: String, result: PairingResult?) {
+        pendingPairingTimeoutTasks[deviceId]?.cancel()
+        pendingPairingTimeoutTasks[deviceId] = nil
+        guard let continuation = pendingPairingContinuations.removeValue(forKey: deviceId) else { return }
+        continuation.resume(returning: result)
     }
 
     // MARK: Heartbeat
@@ -278,23 +339,13 @@ public final class AppViewModel: ObservableObject {
     /// frame (matches firmware Comm_ProcBle PAGE_* constants and the
     /// CH2 offsets for interface-meter virtual devices).
     private var currentPageIndex: UInt16 {
-        // Sub-page overrides
-        if let sub = state.subPage {
-            switch sub {
-            case "pairing":  return Command.pagePairing
-            case "upload":   return Command.pageUpload
-            case "download": return Command.pageDownload
-            default:         return Command.pageMenu
-            }
-        }
-        switch state.tabIndex {
-        case 0: return Command.pageStatus
-        case 1: return Command.pageEcho
-        case 2: return Command.pageTrend
-        case 3: return Command.pageMenu
-        case 4: return Command.pageMenu
-        default: return Command.pageStatus
-        }
+        DeviceRouting.heartbeatPageIndex(
+            tabIndex: state.tabIndex,
+            subPage: state.subPage,
+            activeDeviceId: state.activeDeviceId,
+            deviceType: state.deviceType,
+            echoMode: state.echoMode
+        )
     }
 
     private func ensureHeartbeatRunning() {
@@ -334,6 +385,19 @@ public final class AppViewModel: ObservableObject {
             return
         }
 
+        if interfaceEchoParser.isCollecting {
+            if let echo = interfaceEchoParser.tryParseChunks(rxBuf: &buf) {
+                let targetId = DeviceRouting.logicalDeviceId(
+                    physicalId: deviceId,
+                    cmd: interfaceEchoParser.cmd,
+                    connectedDeviceIds: Set(state.connectedDevices.map(\.id))
+                )
+                applyInterfaceEcho(deviceId: targetId, echo: echo)
+            }
+            rxBuffers[deviceId] = buf
+            if interfaceEchoParser.isCollecting { return }
+        }
+
         // Greedy frame extraction: walk the buffer looking for a SOF, then
         // try every length up to buf.count − sof. parseFrame() validates
         // CRC; if it fails for the current length, advance and try again.
@@ -349,6 +413,28 @@ public final class AppViewModel: ObservableObject {
             }
             // Need at least 5 bytes (SOF + cmd + crc)
             guard buf.count >= 5 else { break }
+
+            let cmd = (UInt16(buf[1]) << 8) | UInt16(buf[2])
+            let connectedIds = Set(state.connectedDevices.map(\.id))
+            let targetDeviceId = DeviceRouting.logicalDeviceId(
+                physicalId: deviceId,
+                cmd: cmd,
+                connectedDeviceIds: connectedIds
+            )
+            let targetIsInterface = state.connectedDevices.first { $0.id == targetDeviceId }?.deviceType == 1
+            if DeviceRouting.isInterfaceEchoCommand(cmd), targetIsInterface {
+                guard buf.count >= 33 else { break }
+                let headerPkt = Array(buf[0..<33])
+                buf.removeFirst(33)
+                interfaceEchoParser.beginCollection(headerPkt: headerPkt, parsedCmd: cmd)
+                if let echo = interfaceEchoParser.tryParseChunks(rxBuf: &buf) {
+                    applyInterfaceEcho(deviceId: targetDeviceId, echo: echo)
+                    consumedAll = false
+                    continue
+                }
+                consumedAll = false
+                break
+            }
 
             // Try increasing frame lengths until parseFrame validates CRC.
             // Cap the search to avoid pathological scans.
@@ -370,7 +456,33 @@ public final class AppViewModel: ObservableObject {
         rxBuffers[deviceId] = buf
     }
 
-    private func dispatchFrame(deviceId: String, frame: ParsedFrame) {
+    private func applyInterfaceEcho(deviceId: String, echo: InterfaceEchoReading) {
+        let echoReading = echo.toEchoReading()
+        state.interfaceEchoReading = echo
+        state.echoReading = echoReading
+        state.deviceEchoReadings[deviceId] = echoReading
+        state.temperatureC = Double(echo.temperature) * 0.1
+    }
+
+    private func dispatchFrame(deviceId physicalDeviceId: String, frame: ParsedFrame) {
+        if let pairing = FrameCodec.parsePairingResponse(cmd: frame.cmd, data: frame.data) {
+            completePendingPairing(deviceId: physicalDeviceId, result: pairing)
+            return
+        }
+
+        let deviceId = DeviceRouting.logicalDeviceId(
+            physicalId: physicalDeviceId,
+            cmd: frame.cmd,
+            connectedDeviceIds: Set(state.connectedDevices.map(\.id))
+        )
+
+        if frame.cmd == Command.cmdCalib {
+            if let points = CalibrationPoint.fromBytes(frame.data) {
+                state.calibrationPoints = points
+            }
+            return
+        }
+
         let isInterface = state.connectedDevices.first { $0.id == deviceId }?.deviceType == 1
         guard let result = FrameParser.parse(cmd: frame.cmd, data: frame.data, isInterface: isInterface)
         else { return }
@@ -452,18 +564,53 @@ public final class AppViewModel: ObservableObject {
     public func startScan() { scanner.startScan() }
     public func stopScan()  { scanner.stopScan() }
 
+    public func toggleDeviceVisibility(_ deviceId: String) {
+        if state.visibleDeviceIds.contains(deviceId) {
+            if state.visibleDeviceIds.count > 1 {
+                state.visibleDeviceIds.remove(deviceId)
+            }
+        } else {
+            state.visibleDeviceIds.insert(deviceId)
+        }
+    }
+
+    public func cycleDensityUnit() {
+        state.densUnit = DensityUnit.fromInt(state.densUnit).next().rawValue
+    }
+
+    public func cycleTemperatureUnit() {
+        state.tempUnit = TemperatureUnit.fromInt(state.tempUnit).next().rawValue
+    }
+
     public func disconnectDevice(_ deviceId: String) {
-        notificationSubs[deviceId]?.cancel()
-        notificationSubs[deviceId] = nil
-        gattClients[deviceId]?.disconnect()
-        gattClients[deviceId] = nil
-        rxBuffers[deviceId] = nil
-        state.connectedDevices.removeAll { $0.id == deviceId }
-        state.deviceReadings[deviceId] = nil
-        state.deviceEchoReadings[deviceId] = nil
-        if state.activeDeviceId == deviceId {
+        let physicalId = DeviceRouting.physicalDeviceId(for: deviceId)
+        let relatedIds = state.connectedDevices
+            .map(\.id)
+            .filter { $0 == physicalId || DeviceRouting.physicalDeviceId(for: $0) == physicalId }
+        let idsToRemove = Set(relatedIds + [physicalId])
+
+        notificationSubs[physicalId]?.cancel()
+        notificationSubs[physicalId] = nil
+        gattClients[physicalId]?.disconnect()
+
+        for id in idsToRemove {
+            gattClients[id] = nil
+            rxBuffers[id] = nil
+            state.deviceReadings[id] = nil
+            state.deviceEchoReadings[id] = nil
+            pendingPairingTimeoutTasks[id]?.cancel()
+            pendingPairingTimeoutTasks[id] = nil
+            pendingPairingContinuations.removeValue(forKey: id)?.resume(returning: nil)
+        }
+        rxBuffers[physicalId] = nil
+        interfaceEchoParser.reset()
+
+        state.connectedDevices.removeAll { idsToRemove.contains($0.id) }
+        state.visibleDeviceIds.subtract(idsToRemove)
+        if idsToRemove.contains(state.activeDeviceId) {
             state.activeDeviceId = state.connectedDevices.first?.id ?? ""
             state.activeDeviceLabel = state.connectedDevices.first?.label ?? ""
+            state.deviceType = state.connectedDevices.first?.deviceType == 1 ? .interface_ : .density
         }
     }
 
@@ -491,7 +638,8 @@ public final class AppViewModel: ObservableObject {
         state.uploadProgress = 0.0
         state.uploadDone = false
         let startedAt = Date()
-        Task { @MainActor in
+        uploadTask?.cancel()
+        uploadTask = Task { @MainActor in
             let uploader = OtaUploader(gatt: gatt)
             let resultCode = await uploader.upload(
                 data: bytes,
@@ -503,16 +651,17 @@ public final class AppViewModel: ObservableObject {
                     }
                 }
             )
+            guard !Task.isCancelled else { return }
             self.state.isUploading = false
             self.state.uploadDone = (resultCode == OtaResult.ok.rawValue)
             self.state.uploadProgress = 1.0
+            self.uploadTask = nil
         }
     }
 
     public func cancelUpload() {
-        // OtaUploader.upload is a single async function — a true cancel
-        // requires a Task handle. Mark UI state for now; full cooperative
-        // cancellation lands in a follow-up.
+        uploadTask?.cancel()
+        uploadTask = nil
         state.isUploading = false
         state.uploadProgress = 0.0
     }
@@ -583,7 +732,7 @@ public final class AppViewModel: ObservableObject {
         // Send the trend download command so the device starts streaming.
         Task { @MainActor in
             guard let gatt = self.gattClients[deviceId] else { return }
-            let cmd = state.deviceType == .interface_ ? Command.cmdDownloadCh2 : Command.cmdDownload
+            let cmd = DeviceRouting.isCh2DeviceId(deviceId) ? Command.cmdDownloadCh2 : Command.cmdDownload
             let frame = FrameCodec.buildHeartbeat(pageIndex: Int(cmd))
             _ = await gatt.write(data: frame, withoutResponse: true)
         }
@@ -613,6 +762,15 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func cancelDataDownload() {
+        let deviceId = state.activeDeviceId
+        if let gatt = gattClients[deviceId] {
+            let cmd = DeviceRouting.isCh2DeviceId(deviceId)
+                ? Command.cmdDownloadCancelCh2
+                : Command.cmdDownloadCancel
+            Task { @MainActor in
+                _ = await gatt.write(data: FrameCodec.buildHeartbeat(pageIndex: Int(cmd)), withoutResponse: true)
+            }
+        }
         trendParser?.reset()
         trendParser = nil
         state.isTrendStreaming = false

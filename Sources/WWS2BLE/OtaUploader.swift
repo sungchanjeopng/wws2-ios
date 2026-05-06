@@ -55,9 +55,11 @@ public final class OtaUploader {
 
         // 1) Send OTA start frame
         try? await Task.sleep(nanoseconds: 50_000_000)
+        if Task.isCancelled { return OtaResult.timeout.rawValue }
         _ = await gatt.write(data: FrameCodec.makeStartFrame(), withoutResponse: true)
 
         let acked = await awaitStartAck(10.0)
+        if Task.isCancelled { return OtaResult.timeout.rawValue }
         if acked {
             try? await Task.sleep(nanoseconds: 500_000_000)
         } else {
@@ -71,6 +73,7 @@ public final class OtaUploader {
         var lastProgress = 0.0
 
         while i < total {
+            if Task.isCancelled { return OtaResult.timeout.rawValue }
             let end = min(i + payload, total)
             let chunk = Array(data[i..<end])
 
@@ -104,7 +107,9 @@ public final class OtaUploader {
         }
 
         // 3) Trailer: CRC-32 + END frame
+        if Task.isCancelled { return OtaResult.timeout.rawValue }
         try? await Task.sleep(nanoseconds: 80_000_000)
+        if Task.isCancelled { return OtaResult.timeout.rawValue }
         let crc = Crc.crc32(data)
         _ = await gatt.write(data: FrameCodec.u32le(crc), withoutResponse: true)
         try? await Task.sleep(nanoseconds: 30_000_000)

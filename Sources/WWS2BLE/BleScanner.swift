@@ -15,6 +15,21 @@ import WWS2Core
 import os
 #endif
 
+/// Receives connect/disconnect events from the scanner-owned CBCentralManager.
+/// CoreBluetooth supports only one central delegate, so GattClient instances
+/// register here instead of trying to become CBCentralManagerDelegate too.
+@MainActor
+public protocol BleCentralEventHandler: AnyObject {
+    func centralDidConnect(_ peripheral: CBPeripheral)
+    func centralDidDisconnect(_ peripheral: CBPeripheral, error: Error?)
+    func centralDidFailToConnect(_ peripheral: CBPeripheral, error: Error?)
+}
+
+private final class WeakBleCentralEventHandler {
+    weak var value: BleCentralEventHandler?
+    init(_ value: BleCentralEventHandler) { self.value = value }
+}
+
 /// BLE device discovery. Filters for WESSWARE devices (W2/W3/ENV/CHIPSEN).
 @MainActor
 public final class BleScanner: NSObject, ObservableObject {
@@ -33,6 +48,7 @@ public final class BleScanner: NSObject, ObservableObject {
         CBCentralManager(delegate: self, queue: .main)
     }()
 
+    private var centralEventHandlers: [ObjectIdentifier: WeakBleCentralEventHandler] = [:]
     private var pendingStart = false
 
     public override init() {
@@ -65,6 +81,40 @@ public final class BleScanner: NSObject, ObservableObject {
         peripheralsById[identifier]
     }
 
+    public func addCentralEventHandler(_ handler: BleCentralEventHandler) {
+        reapCentralEventHandlers()
+        centralEventHandlers[ObjectIdentifier(handler)] = WeakBleCentralEventHandler(handler)
+    }
+
+    public func removeCentralEventHandler(_ handler: BleCentralEventHandler) {
+        centralEventHandlers.removeValue(forKey: ObjectIdentifier(handler))
+    }
+
+    private func reapCentralEventHandlers() {
+        centralEventHandlers = centralEventHandlers.filter { $0.value.value != nil }
+    }
+
+    private func notifyCentralDidConnect(_ peripheral: CBPeripheral) {
+        reapCentralEventHandlers()
+        for box in centralEventHandlers.values {
+            box.value?.centralDidConnect(peripheral)
+        }
+    }
+
+    private func notifyCentralDidDisconnect(_ peripheral: CBPeripheral, error: Error?) {
+        reapCentralEventHandlers()
+        for box in centralEventHandlers.values {
+            box.value?.centralDidDisconnect(peripheral, error: error)
+        }
+    }
+
+    private func notifyCentralDidFailToConnect(_ peripheral: CBPeripheral, error: Error?) {
+        reapCentralEventHandlers()
+        for box in centralEventHandlers.values {
+            box.value?.centralDidFailToConnect(peripheral, error: error)
+        }
+    }
+
     /// 1=weak, 2=ok, 3=strong (matches Android's signalLevel mapping).
     public nonisolated func signalLevel(rssi: Int) -> Int {
         if rssi >= -55 { return 3 }
@@ -91,6 +141,26 @@ extension BleScanner: CBCentralManagerDelegate {
                 self.isScanning = false
             }
         }
+    }
+
+    public nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        Task { @MainActor in self.notifyCentralDidConnect(peripheral) }
+    }
+
+    public nonisolated func centralManager(
+        _ central: CBCentralManager,
+        didDisconnectPeripheral peripheral: CBPeripheral,
+        error: Error?
+    ) {
+        Task { @MainActor in self.notifyCentralDidDisconnect(peripheral, error: error) }
+    }
+
+    public nonisolated func centralManager(
+        _ central: CBCentralManager,
+        didFailToConnect peripheral: CBPeripheral,
+        error: Error?
+    ) {
+        Task { @MainActor in self.notifyCentralDidFailToConnect(peripheral, error: error) }
     }
 
     public nonisolated func centralManager(

@@ -56,6 +56,7 @@ public final class GattClient: NSObject, ObservableObject, BleSession {
         self.scanner = scanner
         self.central = scanner.centralManager
         super.init()
+        scanner.addCentralEventHandler(self)
     }
 
     /// Connect to a peripheral (already discovered via the scanner).
@@ -268,29 +269,22 @@ public final class GattClient: NSObject, ObservableObject, BleSession {
     }
 }
 
-// MARK: - CBCentralManagerDelegate (forwarded from BleScanner-managed central)
+// MARK: - Scanner-owned CBCentralManager forwarding
 
-extension GattClient: CBCentralManagerDelegate {
-    public nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {}
-
-    public nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        Task { @MainActor in self.handleConnect(peripheral) }
+extension GattClient: BleCentralEventHandler {
+    public func centralDidConnect(_ peripheral: CBPeripheral) {
+        guard peripheral === self.peripheral else { return }
+        handleConnect(peripheral)
     }
 
-    public nonisolated func centralManager(
-        _ central: CBCentralManager,
-        didDisconnectPeripheral peripheral: CBPeripheral,
-        error: Error?
-    ) {
-        Task { @MainActor in self.handleDisconnect() }
+    public func centralDidDisconnect(_ peripheral: CBPeripheral, error: Error?) {
+        guard peripheral === self.peripheral else { return }
+        handleDisconnect()
     }
 
-    public nonisolated func centralManager(
-        _ central: CBCentralManager,
-        didFailToConnect peripheral: CBPeripheral,
-        error: Error?
-    ) {
-        Task { @MainActor in self.handleDisconnect() }
+    public func centralDidFailToConnect(_ peripheral: CBPeripheral, error: Error?) {
+        guard peripheral === self.peripheral else { return }
+        handleDisconnect()
     }
 }
 
