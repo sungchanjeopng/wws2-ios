@@ -33,16 +33,7 @@ public struct InterfaceTrendChart: View {
     }
 }
 
-public struct EchoChart: View {
-    public let echo: EchoReading?
-    public init(echo: EchoReading?) { self.echo = echo }
-    public var body: some View {
-        let n = echo?.wave.count ?? 0
-        ChartPlaceholderBody(title: "Echo Chart", subtitle: "\(n) wave samples",
-                             srcFile: "EchoChart.kt (324 lines)")
-    }
-}
-
+// EchoChart is implemented in Components/EchoChart.swift.
 // InterfaceEchoChart is implemented in Components/InterfaceEchoChart.swift.
 
 private struct ChartPlaceholderBody: View {
