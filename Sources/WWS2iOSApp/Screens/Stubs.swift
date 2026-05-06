@@ -89,43 +89,7 @@ public struct DiagnosticsTabScreen: View {
     }
 }
 
-public struct MenuTabScreen: View {
-    @ObservedObject var vm: AppViewModel
-    public var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                MenuRow(title: "Pairing",     action: { vm.openPairing() })
-                MenuRow(title: "Calibration", action: { vm.openCalib() })
-                MenuRow(title: "Firmware Upload", action: { vm.openUpload() })
-                MenuRow(title: "Data Download",   action: { vm.openDownload() })
-                MenuRow(title: "AI Chatbot",      action: { vm.openChatbot() })
-            }
-            .padding(16)
-        }
-    }
-}
-
-private struct MenuRow: View {
-    let title: String
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppColors.darkText)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(AppColors.grayLabel)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(AppColors.white)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-    }
-}
+// MenuTabScreen ported in its own file (Screens/MenuTabScreen.swift).
 
 // MARK: - Sub-page stubs (Pairing, Calib, Upload, Download, Chatbot, Pin, BleError)
 

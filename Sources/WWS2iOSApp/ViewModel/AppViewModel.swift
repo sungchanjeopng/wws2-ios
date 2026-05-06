@@ -149,6 +149,20 @@ public final class AppViewModel: ObservableObject {
     public func openChatbot()  { state.tabIndex = 4; state.subPage = "chatbot" }
     public func openDownload() { state.tabIndex = 4; state.subPage = "download" }
 
+    /// Aliases used by the menu screen — keep call sites identical to the Kotlin
+    /// original until we converge on a single navigation API.
+    public func openDataFilesList() { openDownload() }
+    public func openFirmwareFlow()  { openUpload() }
+
+    /// Tap a device in the strip-bar header. Brings that device to the front
+    /// and updates the active label. BLE-side reconnect logic plugs in later.
+    public func requestConnectDevice(_ deviceId: String) {
+        state.activeDeviceId = deviceId
+        if let dev = state.connectedDevices.first(where: { $0.id == deviceId }) {
+            state.activeDeviceLabel = dev.label
+        }
+    }
+
     public func handleTopBarBack() {
         if state.subPage != nil { state.subPage = nil }
     }
