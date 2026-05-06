@@ -211,6 +211,29 @@ public final class AppViewModel: ObservableObject {
         // TODO: instruct GattClient to disconnect once BLE wiring is in place.
     }
 
+    // MARK: Data download
+
+    public var deviceLabelOrDefault: String {
+        if !state.activeDeviceLabel.isEmpty { return state.activeDeviceLabel }
+        return "--"
+    }
+
+    /// Bring the device to the foreground and start a trend download.
+    public func activateAndDownload(_ deviceId: String) {
+        requestConnectDevice(deviceId)
+        state.dataFilesStage = .downloading
+        // TODO: drive TrendStreamParser via GattClient notifications.
+    }
+
+    public func cancelDataDownload() {
+        state.dataFilesStage = .list
+    }
+
+    public func viewDataFile(_ file: DataFileItem) {
+        state.activeDataFile = file
+        state.dataFilesStage = .view
+    }
+
     public func handleTopBarBack() {
         if state.subPage != nil { state.subPage = nil }
     }

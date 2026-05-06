@@ -48,19 +48,7 @@ struct StubCard<Content: View>: View {
 
 // UploadScreen ported in Screens/UploadScreen.swift.
 
-public struct DataDownloadScreen: View {
-    @ObservedObject var vm: AppViewModel
-    public var body: some View {
-        ScrollView {
-            StubCard(title: "Data Download") {
-                Text("Stage: \(vm.state.dataFilesStage.rawValue)")
-                Text("Saved files: \(vm.state.savedDataFiles.count)")
-                Text("// TODO: port DataDownloadScreen.kt (390 lines)")
-                    .font(.caption).foregroundStyle(AppColors.grayLabel)
-            }
-        }
-    }
-}
+// DataDownloadScreen ported in Screens/DataDownloadScreen.swift.
 
 public struct ChatbotScreen: View {
     @ObservedObject var vm: AppViewModel
