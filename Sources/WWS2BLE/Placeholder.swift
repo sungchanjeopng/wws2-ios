@@ -2,6 +2,6 @@
 import Foundation
 import WWS2Core
 
-enum WWS2BLEVersion {
-    static let id = WWS2CoreVersion.id
+public enum WWS2BLEVersion {
+    public static let id = WWS2CoreVersion.id
 }
