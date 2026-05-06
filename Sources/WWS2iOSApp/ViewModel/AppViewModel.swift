@@ -192,6 +192,25 @@ public final class AppViewModel: ObservableObject {
         state.echoMode = mode
     }
 
+    // MARK: Pairing / scan
+
+    public func startScan() {
+        scanner.startScan()
+    }
+
+    public func stopScan() {
+        scanner.stopScan()
+    }
+
+    public func disconnectDevice(_ deviceId: String) {
+        state.connectedDevices.removeAll { $0.id == deviceId }
+        if state.activeDeviceId == deviceId {
+            state.activeDeviceId = state.connectedDevices.first?.id ?? ""
+            state.activeDeviceLabel = state.connectedDevices.first?.label ?? ""
+        }
+        // TODO: instruct GattClient to disconnect once BLE wiring is in place.
+    }
+
     public func handleTopBarBack() {
         if state.subPage != nil { state.subPage = nil }
     }

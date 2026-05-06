@@ -42,17 +42,7 @@ struct StubCard<Content: View>: View {
 
 // MARK: - Sub-page stubs (Pairing, Calib, Upload, Download, Chatbot, Pin, BleError)
 
-public struct PairingScreen: View {
-    @ObservedObject var vm: AppViewModel
-    public var body: some View {
-        ScrollView {
-            StubCard(title: "Pairing") {
-                Text("// TODO: port PairingScreen.kt (362 lines)")
-                    .font(.caption).foregroundStyle(AppColors.grayLabel)
-            }
-        }
-    }
-}
+// PairingScreen ported in Screens/PairingScreen.swift.
 
 // CalibScreen ported in Screens/CalibScreen.swift.
 
