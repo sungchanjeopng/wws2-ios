@@ -1,0 +1,72 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  spm:
+    name: SPM Build & Test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Resolve dependencies
+        run: swift package resolve
+
+      - name: Build (macOS)
+        run: swift build -v
+
+      - name: Test (macOS)
+        run: swift test -v
+
+  ios-app:
+    name: iOS App (Simulator)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: List schemes
+        run: xcodebuild -list -project WESSWARE.xcodeproj
+
+      - name: Build iOS app for Simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project WESSWARE.xcodeproj \
+            -scheme WESSWARE \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Locate built .app
+        run: |
+          find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d | head -20
+
+      - name: Upload .app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WESSWARE-Simulator-app
+          path: ~/Library/Developer/Xcode/DerivedData/**/Build/Products/Debug-iphonesimulator/*.app
+          if-no-files-found: warn

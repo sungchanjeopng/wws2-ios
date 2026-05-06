@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleDisplayName</key><string>WESSWARE</string>
+    <key>NSBluetoothAlwaysUsageDescription</key><string>WESSWARE 장비와 BLE로 연결하기 위해 Bluetooth 권한이 필요합니다.</string>
+    <key>NSBluetoothPeripheralUsageDescription</key><string>WESSWARE 장비와 BLE로 연결하기 위해 Bluetooth 권한이 필요합니다.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>챗봇/네트워크 기능 사용 시 인터넷 연결이 필요할 수 있습니다.</string>
+    <key>UIBackgroundModes</key><array><string>bluetooth-central</string></array>
+</dict></plist>

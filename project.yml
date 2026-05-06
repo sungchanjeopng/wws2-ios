@@ -1,0 +1,40 @@
+name: WESSWARE
+options:
+  bundleIdPrefix: com.wessglobal
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  developmentLanguage: ko
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+packages:
+  WWS2iOS:
+    path: .
+targets:
+  WESSWARE:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/WWS2iOSApp
+    info:
+      path: iOSApp/Info.plist
+      properties:
+        CFBundleDisplayName: WESSWARE
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wessglobal.wessware
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: "NO"
+    dependencies:
+      - package: WWS2iOS
+        product: WWS2Core
+      - package: WWS2iOS
+        product: WWS2BLE
