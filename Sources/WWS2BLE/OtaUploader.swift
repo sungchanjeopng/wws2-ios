@@ -40,6 +40,13 @@ public enum OtaResult: Int, Sendable {
 @MainActor
 public final class OtaUploader {
 
+    public static let bootloaderTrimOffset = 0x8000
+
+    public static func payloadForUpload(_ bytes: [UInt8]) -> [UInt8] {
+        guard bytes.count > bootloaderTrimOffset else { return bytes }
+        return Array(bytes.dropFirst(bootloaderTrimOffset))
+    }
+
     private let gatt: GattClient
     public init(gatt: GattClient) { self.gatt = gatt }
 
@@ -56,14 +63,17 @@ public final class OtaUploader {
         // 1) Send OTA start frame
         try? await Task.sleep(nanoseconds: 50_000_000)
         if Task.isCancelled { return OtaResult.timeout.rawValue }
-        _ = await gatt.write(data: FrameCodec.makeStartFrame(), withoutResponse: true)
+        let startAckTask = Task { await awaitStartAck(10.0) }
+        await Task.yield()
+        let wroteStart = await gatt.write(data: FrameCodec.makeStartFrame(), withoutResponse: true)
+        if !wroteStart { return OtaResult.timeout.rawValue }
 
-        let acked = await awaitStartAck(10.0)
+        let acked = await startAckTask.value
         if Task.isCancelled { return OtaResult.timeout.rawValue }
         if acked {
             try? await Task.sleep(nanoseconds: 500_000_000)
         } else {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            return OtaResult.timeout.rawValue
         }
 
         // 2) Stream payload in chunks

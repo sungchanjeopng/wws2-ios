@@ -48,8 +48,12 @@ public final class GattClient: NSObject, ObservableObject, BleSession {
 
     private var connectContinuation: CheckedContinuation<Bool, Never>?
     private var writeContinuation: CheckedContinuation<Bool, Never>?
+    private var readyToSendWithoutResponseContinuation: CheckedContinuation<Bool, Never>?
     private var connectTimeoutTask: Task<Void, Never>?
     private var writeTimeoutTask: Task<Void, Never>?
+    private var readyToSendWithoutResponseTimeoutTask: Task<Void, Never>?
+    private var isWriteLocked = false
+    private var pendingWriteLockContinuations: [CheckedContinuation<Void, Never>] = []
 
     /// Create a client bound to a scanner-owned central manager.
     public init(scanner: BleScanner) {
@@ -85,6 +89,8 @@ public final class GattClient: NSObject, ObservableObject, BleSession {
         if let p = peripheral {
             central.cancelPeripheralConnection(p)
         }
+        completeWrite(false)
+        completeReadyToSendWithoutResponse(false)
         peripheral = nil
         writeChar = nil
         notifyChar = nil
@@ -113,13 +119,18 @@ public final class GattClient: NSObject, ObservableObject, BleSession {
     /// `withoutResponse=true` uses fire-and-forget; otherwise we await the
     /// `peripheral(_:didWriteValueFor:error:)` callback.
     public func write(data: [UInt8], withoutResponse: Bool = false) async -> Bool {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+
         guard let p = peripheral, let wc = writeChar else { return false }
         let payload = Data(data)
 
         let useNoResponse = withoutResponse && useWriteNoResponse
         if useNoResponse {
+            let ready = await waitUntilReadyToSendWithoutResponse(timeout: 1.0)
+            guard ready, let peripheral = peripheral, let writeChar = writeChar else { return false }
             // Yield momentarily so we don't overflow the BLE TX queue.
-            p.writeValue(payload, for: wc, type: .withoutResponse)
+            peripheral.writeValue(payload, for: writeChar, type: .withoutResponse)
             try? await Task.sleep(nanoseconds: 5_000_000)  // 5 ms (matches Android's 5L delay)
             return true
         }
@@ -190,11 +201,57 @@ public final class GattClient: NSObject, ObservableObject, BleSession {
         }
     }
 
+    private func acquireWriteLock() async {
+        if !isWriteLocked {
+            isWriteLocked = true
+            return
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            pendingWriteLockContinuations.append(cont)
+        }
+    }
+
+    private func releaseWriteLock() {
+        guard isWriteLocked else { return }
+        if pendingWriteLockContinuations.isEmpty {
+            isWriteLocked = false
+            return
+        }
+        let next = pendingWriteLockContinuations.removeFirst()
+        next.resume()
+    }
+
+    private func waitUntilReadyToSendWithoutResponse(timeout: TimeInterval) async -> Bool {
+        guard let peripheral else { return false }
+        if peripheral.canSendWriteWithoutResponse { return true }
+
+        completeReadyToSendWithoutResponse(false)
+
+        return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            readyToSendWithoutResponseContinuation = cont
+            readyToSendWithoutResponseTimeoutTask = Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                await MainActor.run { self.completeReadyToSendWithoutResponse(false) }
+            }
+        }
+    }
+
+    private func completeReadyToSendWithoutResponse(_ value: Bool) {
+        readyToSendWithoutResponseTimeoutTask?.cancel()
+        readyToSendWithoutResponseTimeoutTask = nil
+        if let cont = readyToSendWithoutResponseContinuation {
+            readyToSendWithoutResponseContinuation = nil
+            cont.resume(returning: value)
+        }
+    }
+
     fileprivate func handleConnect(_ peripheral: CBPeripheral) {
         peripheral.discoverServices(nil)
     }
 
     fileprivate func handleDisconnect() {
+        completeReadyToSendWithoutResponse(false)
+        completeWrite(false)
         peripheral = nil
         writeChar = nil
         notifyChar = nil
@@ -267,6 +324,11 @@ public final class GattClient: NSObject, ObservableObject, BleSession {
     fileprivate func handleWriteValueDone(error: Error?) {
         completeWrite(error == nil)
     }
+
+    fileprivate func handleReadyToSendWithoutResponse(_ peripheral: CBPeripheral) {
+        guard peripheral === self.peripheral else { return }
+        completeReadyToSendWithoutResponse(true)
+    }
 }
 
 // MARK: - Scanner-owned CBCentralManager forwarding
@@ -310,5 +372,9 @@ extension GattClient: CBPeripheralDelegate {
 
     public nonisolated func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         Task { @MainActor in self.handleWriteValueDone(error: error) }
+    }
+
+    public nonisolated func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        Task { @MainActor in self.handleReadyToSendWithoutResponse(peripheral) }
     }
 }

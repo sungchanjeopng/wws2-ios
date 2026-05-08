@@ -33,3 +33,7 @@ Desktop.ini
 
 # Logs
 *.log
+
+# Local AI agent work dirs
+.omx/
+.omc/

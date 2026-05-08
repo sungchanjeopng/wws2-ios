@@ -125,6 +125,10 @@ public final class AppViewModel: ObservableObject {
     private var pendingPairingContinuations: [String: CheckedContinuation<PairingResult?, Never>] = [:]
     private var pendingPairingTimeoutTasks: [String: Task<Void, Never>] = [:]
     private var uploadTask: Task<Void, Never>? = nil
+    private var uploadGeneration: UInt64 = 0
+    private var pendingOtaStartAckContinuation: CheckedContinuation<Bool, Never>?
+    private var pendingOtaStartAckTimeoutTask: Task<Void, Never>?
+    private var pendingOtaStartAckGeneration: UInt64?
 
     /// Pending pairing attempt — set when the user taps a scanned device,
     /// consumed when the PIN screen completes.
@@ -304,7 +308,7 @@ public final class AppViewModel: ObservableObject {
         gatt: GattClient,
         deviceId: String,
         pin: Int,
-        timeout: TimeInterval = 3.0
+        timeout: TimeInterval = 5.0
     ) async -> PairingResult? {
         await withCheckedContinuation { (continuation: CheckedContinuation<PairingResult?, Never>) in
             pendingPairingContinuations[deviceId] = continuation
@@ -317,7 +321,7 @@ public final class AppViewModel: ObservableObject {
             Task { @MainActor in
                 let wrote = await gatt.write(
                     data: FrameCodec.buildDeviceInfoRequest(pin: pin),
-                    withoutResponse: false
+                    withoutResponse: true
                 )
                 if !wrote {
                     self.completePendingPairing(deviceId: deviceId, result: nil)
@@ -331,6 +335,29 @@ public final class AppViewModel: ObservableObject {
         pendingPairingTimeoutTasks[deviceId] = nil
         guard let continuation = pendingPairingContinuations.removeValue(forKey: deviceId) else { return }
         continuation.resume(returning: result)
+    }
+
+    private func waitForOtaStartAck(timeout: TimeInterval, generation: UInt64) async -> Bool {
+        completePendingOtaStartAck(false)
+
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            pendingOtaStartAckContinuation = continuation
+            pendingOtaStartAckGeneration = generation
+            pendingOtaStartAckTimeoutTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                self.completePendingOtaStartAck(false, generation: generation)
+            }
+        }
+    }
+
+    private func completePendingOtaStartAck(_ value: Bool, generation: UInt64? = nil) {
+        if let generation, pendingOtaStartAckGeneration != generation { return }
+        pendingOtaStartAckTimeoutTask?.cancel()
+        pendingOtaStartAckTimeoutTask = nil
+        pendingOtaStartAckGeneration = nil
+        guard let continuation = pendingOtaStartAckContinuation else { return }
+        pendingOtaStartAckContinuation = nil
+        continuation.resume(returning: value)
     }
 
     // MARK: Heartbeat
@@ -348,12 +375,23 @@ public final class AppViewModel: ObservableObject {
         )
     }
 
+    private var shouldSuppressHeartbeat: Bool {
+        if state.isUploading || state.isTrendStreaming || uploadTask != nil {
+            return true
+        }
+        if let parser = trendParser, parser.isActive {
+            return true
+        }
+        return state.dataFilesStage == .downloading
+    }
+
     private func ensureHeartbeatRunning() {
         if heartbeatTask != nil { return }
         heartbeatTask = Task { @MainActor [weak self] in
             while let self, !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 if self.state.connectedDevices.isEmpty { break }
+                if self.shouldSuppressHeartbeat { continue }
                 guard let activeId = self.state.connectedDevices.first(where: { $0.id == self.state.activeDeviceId })?.id
                         ?? self.state.connectedDevices.first?.id,
                       let gatt = self.gattClients[activeId] else { continue }
@@ -465,6 +503,11 @@ public final class AppViewModel: ObservableObject {
     }
 
     private func dispatchFrame(deviceId physicalDeviceId: String, frame: ParsedFrame) {
+        if frame.cmd == Command.cmdOtaStart {
+            completePendingOtaStartAck(true)
+            return
+        }
+
         if let pairing = FrameCodec.parsePairingResponse(cmd: frame.cmd, data: frame.data) {
             completePendingPairing(deviceId: physicalDeviceId, result: pairing)
             return
@@ -634,16 +677,26 @@ public final class AppViewModel: ObservableObject {
     public func startUpload() {
         guard let bytes = pickedFirmwareBytes,
               let gatt = gattClients[state.firmwareTargetDeviceId] else { return }
+        // Android parity/bootloader offset: trim the 0x8000 bootloader
+        // region before passing firmware bytes into OTA payload upload.
+        let uploadBytes = OtaUploader.payloadForUpload(bytes)
+
         state.isUploading = true
         state.uploadProgress = 0.0
         state.uploadDone = false
         let startedAt = Date()
+        uploadGeneration &+= 1
+        let generation = uploadGeneration
+        completePendingOtaStartAck(false)
         uploadTask?.cancel()
         uploadTask = Task { @MainActor in
             let uploader = OtaUploader(gatt: gatt)
             let resultCode = await uploader.upload(
-                data: bytes,
-                awaitStartAck: { _ in true },          // ACK is implicit on iOS path
+                data: uploadBytes,
+                awaitStartAck: { [weak self] timeout in
+                    guard let self else { return false }
+                    return await self.waitForOtaStartAck(timeout: timeout, generation: generation)
+                },
                 onProgress: { [weak self] p in
                     Task { @MainActor in
                         self?.state.uploadProgress = p
@@ -651,7 +704,8 @@ public final class AppViewModel: ObservableObject {
                     }
                 }
             )
-            guard !Task.isCancelled else { return }
+            self.completePendingOtaStartAck(false, generation: generation)
+            guard generation == self.uploadGeneration, !Task.isCancelled else { return }
             self.state.isUploading = false
             self.state.uploadDone = (resultCode == OtaResult.ok.rawValue)
             self.state.uploadProgress = 1.0
@@ -660,8 +714,10 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func cancelUpload() {
+        uploadGeneration &+= 1
         uploadTask?.cancel()
         uploadTask = nil
+        completePendingOtaStartAck(false)
         state.isUploading = false
         state.uploadProgress = 0.0
     }
