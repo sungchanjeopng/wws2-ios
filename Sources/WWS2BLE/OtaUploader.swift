@@ -40,9 +40,9 @@ public enum OtaResult: Int, Sendable {
 @MainActor
 public final class OtaUploader {
 
-    public static let bootloaderTrimOffset = 0x8000
+    public nonisolated static let bootloaderTrimOffset = 0x8000
 
-    public static func payloadForUpload(_ bytes: [UInt8]) -> [UInt8] {
+    public nonisolated static func payloadForUpload(_ bytes: [UInt8]) -> [UInt8] {
         guard bytes.count > bootloaderTrimOffset else { return bytes }
         return Array(bytes.dropFirst(bootloaderTrimOffset))
     }
