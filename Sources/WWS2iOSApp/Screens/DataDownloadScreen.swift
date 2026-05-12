@@ -161,7 +161,9 @@ private struct DownloadingStage: View {
                 TargetDeviceCard(targetDevice: file?.targetDevice ?? vm.deviceLabelOrDefault)
                 Spacer().frame(height: 14)
                 ProgressCard(fileName: file?.name ?? "--",
-                             subtitle: "\(receivedRecords) records received",
+                             subtitle: vm.state.trendExpectedRecords > 0
+                                ? "\(receivedRecords) / \(vm.state.trendExpectedRecords) records received"
+                                : "\(receivedRecords) records received",
                              progress: progress)
                 Spacer().frame(height: 18)
                 Button(action: { vm.cancelDataDownload() }) {

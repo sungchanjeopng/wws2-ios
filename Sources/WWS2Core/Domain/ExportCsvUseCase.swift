@@ -2,8 +2,8 @@
 //
 // CSV export of TrendRecord lists. The Android original uses external Documents
 // + FileProvider for share intents. On iOS we use the app's Documents directory
-// via FileManager. The CSV string format (column headers, formatting precision)
-// is preserved bit-for-bit so files written from either platform are identical.
+// via FileManager. The CSV string format follows the active Android
+// MainViewModel export path used by the app UI.
 
 import Foundation
 
@@ -48,7 +48,7 @@ public final class ExportCsvUseCase {
     /// Build the CSV body (header + rows) for a list of trend records.
     /// `isInterface=true` produces the 4-column interface-meter format,
     /// otherwise the 7-column density-meter format. Column order, headers,
-    /// and decimal precision match the Kotlin original exactly.
+    /// and decimal precision match the active Kotlin UI export path.
     public func buildCsvContent(records: [TrendRecord], isInterface: Bool) -> String {
         var sb = ""
         if isInterface {
@@ -69,13 +69,13 @@ public final class ExportCsvUseCase {
             for r in records {
                 let dt = formatDateTime(r.dateTime)
                 let line = String(
-                    format: "%@,%d,%.2f,%.1f,%d,%.2f,%d\n",
+                    format: "%@,%d,%.2f,%.1f,%d,%d,%d\n",
                     dt,
                     r.eeaD,
                     r.dst,
                     r.temperature,
                     r.step,
-                    Double(r.vca) * 0.01,
+                    r.vca,
                     r.status
                 )
                 sb.append(line)

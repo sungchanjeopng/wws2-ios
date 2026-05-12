@@ -1,4 +1,7 @@
 // Ported from app/src/main/java/com/wws2/densitymeter/ui/component/TopBar.kt
+//
+// Optional assistant entrypoints are intentionally omitted in the iOS port.
+// The product scope for this build is BLE/device operation only.
 
 import SwiftUI
 
@@ -8,10 +11,8 @@ public struct TopBar: View {
     public let title: String
     public var showBack: Bool = false
     public var rxBlink: Bool = false
-    public var aiActive: Bool = false
     public var onBackTap: () -> Void = {}
     public var onBleTap: () -> Void = {}
-    public var onChatTap: () -> Void = {}
 
     public init(
         isConnected: Bool,
@@ -19,20 +20,16 @@ public struct TopBar: View {
         title: String,
         showBack: Bool = false,
         rxBlink: Bool = false,
-        aiActive: Bool = false,
         onBackTap: @escaping () -> Void = {},
-        onBleTap: @escaping () -> Void = {},
-        onChatTap: @escaping () -> Void = {}
+        onBleTap: @escaping () -> Void = {}
     ) {
         self.isConnected = isConnected
         self.statusLabel = statusLabel
         self.title = title
         self.showBack = showBack
         self.rxBlink = rxBlink
-        self.aiActive = aiActive
         self.onBackTap = onBackTap
         self.onBleTap = onBleTap
-        self.onChatTap = onChatTap
     }
 
     public var body: some View {
@@ -50,9 +47,11 @@ public struct TopBar: View {
                     .font(.system(size: 24, weight: .bold))
                     .kerning(-0.8)
                     .foregroundStyle(AppColors.darkText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Spacer()
             }
-            AiSparkleButton(active: aiActive, onTap: onChatTap)
+
             BlePillButton(
                 isConnected: isConnected,
                 label: statusLabel,
@@ -64,41 +63,6 @@ public struct TopBar: View {
         .padding(.top, 12)
         .padding(.bottom, 8)
         .background(AppColors.white)
-    }
-}
-
-public struct AiSparkleButton: View {
-    public var active: Bool = false
-    public var onTap: () -> Void = {}
-
-    public var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 3) {
-                Text("✨").font(.system(size: 12))
-                Text("AI")
-                    .font(.system(size: 16, weight: .bold))
-                    .kerning(-0.2)
-            }
-            .foregroundStyle(active ? Color.white : AppColors.grayLabel)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(
-                Group {
-                    if active {
-                        LinearGradient(
-                            colors: [Color(hex: 0x7C3AED), Color(hex: 0x3B82F6)],
-                            startPoint: .leading, endPoint: .trailing
-                        )
-                    } else {
-                        AppColors.pillDisconnected
-                    }
-                }
-            )
-            .clipShape(Capsule())
-            .shadow(color: active ? Color(hex: 0x7C3AED).opacity(0.3) : .clear,
-                    radius: active ? 6 : 0)
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -118,6 +82,8 @@ public struct BlePillButton: View {
                     .font(.system(size: 16, weight: .bold))
                     .kerning(-0.2)
                     .foregroundStyle(isConnected ? Color.white : AppColors.grayLabel)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)

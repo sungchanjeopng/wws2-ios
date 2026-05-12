@@ -22,7 +22,8 @@ import WWS2BLE
 
 public struct MainUiState: Equatable {
     public var tabIndex: Int = 0
-    /// "pairing", "download", "upload", "chatbot", "calib" — or nil for a top-level tab.
+    /// "pairing", "download", "upload", "calib" — or nil for a top-level tab.
+    /// Optional assistant sub-pages are intentionally excluded from this port scope.
     public var subPage: String? = nil
 
     public var connectedDevices: [ConnectedBleDevice] = []
@@ -143,46 +144,61 @@ public final class AppViewModel: ObservableObject {
     }
 
     public var statusLabel: String {
-        isConnected ? state.activeDeviceLabel.isEmpty
-            ? "Connected" : state.activeDeviceLabel
-            : "Disconnected"
+        let count = state.connectedDevices.count
+        return count > 0 ? "\(count) Connected" : "Disconnected"
     }
 
     public var currentTitle: String {
         switch (state.tabIndex, state.subPage) {
-        case (4, "pairing"):  return "Pairing"
+        case (4, "pairing"):  return "BLE Pairing"
         case (4, "calib"):    return "Calibration"
-        case (4, "upload"):   return "Firmware Upload"
-        case (4, "chatbot"):  return "AI Chatbot"
+        case (4, "upload"):   return "Firmware Update"
         case (4, "download"): return "Data Files"
         case (4, _):          return "Menu"
         case (0, _):          return "Main"
         case (1, _):          return "Echo"
         case (2, _):          return "Trend"
-        case (3, _):          return "Diagnostics"
+        case (3, _):          return "Parameter"
         default:              return "WESSWARE"
         }
     }
 
     public func setTab(_ index: Int) {
-        if state.isTrendStreaming { return }
+        if state.isTrendStreaming || state.isUploading { return }
         if state.tabIndex == 4 && state.subPage == "pairing" {
             scanner.stopScan()
         }
+        if index != 2 {
+            trendParser?.reset()
+            trendParser = nil
+            state.isTrendStreaming = false
+        }
         state.tabIndex = index
         state.subPage = nil
+        if index == 2 { state.trendError = nil }
     }
 
     public func openPairing()  { state.tabIndex = 4; state.subPage = "pairing" }
     public func openCalib()    { state.tabIndex = 4; state.subPage = "calib" }
     public func openUpload()   { state.tabIndex = 4; state.subPage = "upload" }
-    public func openChatbot()  { state.tabIndex = 4; state.subPage = "chatbot" }
     public func openDownload() { state.tabIndex = 4; state.subPage = "download" }
 
     /// Aliases used by the menu screen — keep call sites identical to the
     /// Kotlin original until we converge on a single navigation API.
-    public func openDataFilesList() { openDownload() }
-    public func openFirmwareFlow()  { openUpload() }
+    public func openDataFilesList() {
+        state.tabIndex = 4
+        state.subPage = "download"
+        state.dataFilesStage = .list
+        state.trendError = nil
+        state.savedDataFiles = loadSavedDataFileItems()
+    }
+
+    public func openFirmwareFlow() {
+        state.tabIndex = 4
+        state.subPage = "upload"
+        if state.isUploading { return }
+        resetFirmwareSelection(clearTarget: true)
+    }
 
     /// Tap a device in the strip-bar header / pairing list:
     /// - if it's an already-connected device, just promote it to active;
@@ -664,12 +680,33 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func selectFirmwareTarget(_ deviceId: String) {
+        if let connected = state.connectedDevices.first(where: { $0.id == deviceId }) {
+            state.activeDeviceId = connected.id
+            state.activeDeviceLabel = connected.label
+            state.deviceType = connected.deviceType == 1 ? .interface_ : .density
+        }
+        state.subPage = "upload"
         state.firmwareTargetDeviceId = deviceId
+        resetFirmwareSelection(clearTarget: false)
+    }
+
+    private func resetFirmwareSelection(clearTarget: Bool) {
+        if clearTarget { state.firmwareTargetDeviceId = "" }
+        state.pickedFileName = nil
+        state.pickedFileSize = nil
+        state.isUploading = false
+        state.uploadProgress = 0.0
+        state.uploadDone = false
+        state.uploadElapsed = 0
+        pickedFirmwareBytes = nil
     }
 
     public func setPickedFile(name: String, size: Int, bytes: [UInt8]) {
         state.pickedFileName = name
         state.pickedFileSize = size
+        state.uploadDone = false
+        state.uploadProgress = 0.0
+        state.uploadElapsed = 0
         pickedFirmwareBytes = bytes
     }
 
@@ -730,13 +767,15 @@ public final class AppViewModel: ObservableObject {
 
     public var deviceLabelOrDefault: String {
         if !state.activeDeviceLabel.isEmpty { return state.activeDeviceLabel }
-        return "--"
+        return state.deviceType == .interface_ ? "ENV130_A02" : "ENV230_A01"
     }
 
     public func activateAndDownload(_ deviceId: String) {
         requestConnectDevice(deviceId)
         state.dataFilesStage = .downloading
+        state.activeDataFile = nil
         state.downloadRecords = []
+        state.trendExpectedRecords = 0
         state.dataDownloadProgress = 0
         state.trendError = nil
         state.isTrendStreaming = true
@@ -796,25 +835,34 @@ public final class AppViewModel: ObservableObject {
 
     private func persistDownloadedFile(deviceId: String) {
         let useCase = ExportCsvUseCase()
-        let label = state.connectedDevices.first { $0.id == deviceId }?.label ?? "WESSWARE"
+        let label = state.connectedDevices.first { $0.id == deviceId }?.label ?? deviceLabelOrDefault
         let stamp = useCase.formatDateStamp(Date())
         let filename = "\(label)_\(stamp).csv"
-        let isInterface = state.deviceType == .interface_
-        _ = useCase.saveCsvToDocuments(
+        let isInterface = label.uppercased().contains("ENV130") || state.deviceType == .interface_
+        let savedPath = useCase.saveCsvToDocuments(
             fileName: filename,
             records: state.downloadRecords,
             isInterface: isInterface
         )
+        let size: Int
+        if let path = savedPath,
+           let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+           let number = attrs[.size] as? NSNumber {
+            size = number.intValue
+        } else {
+            size = 0
+        }
         let item = DataFileItem(
             name: filename,
             recordCount: state.downloadRecords.count,
-            rangeLabel: "—",
-            sizeBytes: 0,
+            rangeLabel: rangeLabel(for: state.downloadRecords),
+            sizeBytes: size,
             targetDevice: label,
-            chartRecords: state.downloadRecords
+            chartRecords: state.downloadRecords,
+            allRecords: state.downloadRecords
         )
         state.activeDataFile = item
-        state.savedDataFiles.insert(item, at: 0)
+        state.savedDataFiles = ([item] + state.savedDataFiles.filter { $0.name != item.name }).prefix(8).map { $0 }
     }
 
     public func cancelDataDownload() {
@@ -834,29 +882,90 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func viewDataFile(_ file: DataFileItem) {
-        state.activeDataFile = file
+        let loaded: DataFileItem
+        if file.chartRecords.isEmpty, let content = savedCsvContent(named: file.name) {
+            loaded = makeDataFile(
+                name: file.name,
+                size: file.sizeBytes,
+                content: content,
+                targetDeviceFallback: file.targetDevice
+            )
+        } else {
+            loaded = file
+        }
+        state.activeDataFile = loaded
         state.dataFilesStage = .view
     }
 
     public func handleTopBarBack() {
-        if state.subPage != nil { state.subPage = nil }
+        guard let subPage = state.subPage else { return }
+        switch subPage {
+        case "pairing":
+            scanner.stopScan()
+            state.subPage = nil
+        case "download":
+            if state.dataFilesStage != .list {
+                openDataFilesList()
+            } else {
+                state.subPage = nil
+            }
+        case "upload":
+            if state.isUploading { return }
+            if !state.firmwareTargetDeviceId.isEmpty || state.uploadDone {
+                resetFirmwareSelection(clearTarget: true)
+            } else {
+                state.subPage = nil
+            }
+        default:
+            state.subPage = nil
+        }
     }
 
-    // MARK: CSV picker stubs (file picker UI is platform-specific; landed later)
+    // MARK: CSV import / export
 
-    public func importCsvFile(name: String, size: Int) { /* TODO */ }
+    public func importCsvFile(name: String, size: Int) {
+        if let content = savedCsvContent(named: name) {
+            importCsvFile(name: name, size: size, content: content)
+            return
+        }
+        let file = DataFileItem(
+            name: name,
+            recordCount: 0,
+            rangeLabel: "--",
+            sizeBytes: size,
+            targetDevice: targetDeviceName(forCsvName: name, fallback: deviceLabelOrDefault),
+            chartRecords: [],
+            allRecords: []
+        )
+        state.subPage = "download"
+        state.activeDataFile = file
+        state.savedDataFiles = ([file] + state.savedDataFiles.filter { $0.name != file.name }).prefix(8).map { $0 }
+        state.dataFilesStage = .view
+    }
+
+    public func importCsvFile(name: String, size: Int, content: String) {
+        let file = makeDataFile(
+            name: name,
+            size: size,
+            content: content,
+            targetDeviceFallback: deviceLabelOrDefault
+        )
+        let useCase = ExportCsvUseCase()
+        _ = useCase.saveCsvText(fileName: name, content: content)
+        state.tabIndex = 4
+        state.subPage = "download"
+        state.activeDataFile = file
+        state.savedDataFiles = ([file] + state.savedDataFiles.filter { $0.name != file.name }).prefix(8).map { $0 }
+        state.dataFilesStage = .view
+    }
 
     public func getCsvContentForSave() -> (String, String)? {
-        // Build a CSV from the current trend records of the active device.
-        let active = state.activeDeviceId
-        let records = state.trendRecords.filter { $0.deviceId == active }
+        guard let file = state.activeDataFile else { return nil }
+        let records = file.allRecords.isEmpty ? file.chartRecords : file.allRecords
         guard !records.isEmpty else { return nil }
         let useCase = ExportCsvUseCase()
-        let isInterface = state.deviceType == .interface_
-        let csv = useCase.buildCsvContent(records: records, isInterface: isInterface)
-        let stamp = useCase.formatDateStamp(records.first?.dateTime ?? Date())
-        let label = state.activeDeviceLabel.isEmpty ? "WESSWARE" : state.activeDeviceLabel
-        return ("\(label)_\(stamp).csv", csv)
+        let csv = useCase.buildCsvContent(records: records, isInterface: isInterfaceDataFile(file))
+        return (file.name, csv)
     }
 
     public func shareDataFile() -> URL? {
@@ -866,5 +975,137 @@ public final class AppViewModel: ObservableObject {
         let url = dir.appendingPathComponent(filename)
         try? content.data(using: .utf8)?.write(to: url, options: [.atomic])
         return url
+    }
+
+    private func loadSavedDataFileItems() -> [DataFileItem] {
+        ExportCsvUseCase().loadSavedFiles().prefix(8).map { info in
+            DataFileItem(
+                name: info.name,
+                recordCount: info.recordCount,
+                rangeLabel: info.rangeLabel,
+                sizeBytes: info.sizeBytes,
+                targetDevice: info.targetDevice,
+                chartRecords: [],
+                allRecords: []
+            )
+        }
+    }
+
+    private func savedCsvContent(named name: String) -> String? {
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let url = documents
+            .appendingPathComponent(ExportCsvUseCase.documentsSubfolder, isDirectory: true)
+            .appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+
+    private func makeDataFile(
+        name: String,
+        size: Int,
+        content: String,
+        targetDeviceFallback: String
+    ) -> DataFileItem {
+        let targetDevice = targetDeviceName(forCsvName: name, fallback: targetDeviceFallback)
+        let lines = content
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard let header = lines.first else {
+            return DataFileItem(name: name, recordCount: 0, rangeLabel: "--", sizeBytes: size,
+                                targetDevice: targetDevice, chartRecords: [], allRecords: [])
+        }
+        let isInterface = header.lowercased().contains("light")
+            || header.lowercased().contains("heavy")
+            || targetDevice.uppercased().contains("ENV130")
+        let parser = csvDateFormatter("yyyy-MM-dd HH:mm:ss")
+        let allRecords: [TrendRecord] = lines.dropFirst().compactMap { line in
+            let cols = line.split(separator: ",", omittingEmptySubsequences: false)
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard cols.count >= 4, let date = parser.date(from: cols[0]) else { return nil }
+            if isInterface {
+                guard let light = Double(cols[1]),
+                      let heavy = Double(cols[2]),
+                      let temp = Double(cols[3]) else { return nil }
+                return TrendRecord(
+                    dateTime: date,
+                    eeaD: Int((heavy / 0.01).rounded()),
+                    dst: light,
+                    temperature: temp
+                )
+            }
+            guard let eea = Int(cols[1]),
+                  let density = Double(cols[2]),
+                  let temp = Double(cols[3]) else { return nil }
+            let step = cols.count > 4 ? (Int(cols[4]) ?? 0) : 0
+            let vca = cols.count > 5 ? parseVcaRaw(cols[5]) : 0
+            let status = cols.count > 6 ? (Int(cols[6]) ?? 0) : 0
+            return TrendRecord(
+                dateTime: date,
+                eeaD: eea,
+                dst: density,
+                temperature: temp,
+                step: step,
+                vca: vca,
+                status: status
+            )
+        }
+
+        var seenDates = Set<Date>()
+        let chartRecords = allRecords.filter { record in
+            if seenDates.contains(record.dateTime) { return false }
+            seenDates.insert(record.dateTime)
+            return true
+        }
+
+        return DataFileItem(
+            name: name,
+            recordCount: allRecords.count,
+            rangeLabel: rangeLabel(for: allRecords),
+            sizeBytes: size,
+            targetDevice: targetDevice,
+            chartRecords: chartRecords,
+            allRecords: allRecords
+        )
+    }
+
+    private func parseVcaRaw(_ text: String) -> Int {
+        if let value = Int(text) { return value }
+        if let scaled = Double(text) { return Int((scaled * 100.0).rounded()) }
+        return 0
+    }
+
+    private func targetDeviceName(forCsvName name: String, fallback: String) -> String {
+        if let range = name.range(of: #"ENV\d+_A\d{2}"#, options: [.regularExpression, .caseInsensitive]) {
+            return String(name[range]).uppercased()
+        }
+        let upper = name.uppercased()
+        if upper.contains("ENV130") { return "ENV130" }
+        if upper.contains("ENV230") { return "ENV230" }
+        return fallback
+    }
+
+    private func isInterfaceDataFile(_ file: DataFileItem) -> Bool {
+        let upper = "\(file.targetDevice) \(file.name)".uppercased()
+        return upper.contains("ENV130") || state.deviceType == .interface_
+    }
+
+    private func rangeLabel(for records: [TrendRecord]) -> String {
+        guard records.count >= 2 else { return "--" }
+        let formatter = csvDateFormatter("MM/dd HH:mm:ss")
+        return "\(formatter.string(from: records.first!.dateTime)) ~ \(formatter.string(from: records.last!.dateTime))"
+    }
+
+    private func csvDateFormatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = format
+        return formatter
     }
 }

@@ -26,7 +26,7 @@ final class ExportCsvUseCaseTests: XCTestCase {
         let csv = useCase.buildCsvContent(records: [r], isInterface: false)
         let lines = csv.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         XCTAssertEqual(lines.first, "Time,EEA,Density,Temp,Step,VCA,Status")
-        XCTAssertEqual(lines[1], "2024-03-15 14:25:30,100,12.34,25.5,7,0.42,3")
+        XCTAssertEqual(lines[1], "2024-03-15 14:25:30,100,12.34,25.5,7,42,3")
     }
 
     func testInterfaceCsvHeaderAndRowFormat() {

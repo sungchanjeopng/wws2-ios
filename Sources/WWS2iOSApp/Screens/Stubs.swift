@@ -40,7 +40,7 @@ struct StubCard<Content: View>: View {
 // DiagnosticsTabScreen ported in Screens/DiagnosticsTabScreen.swift.
 // MenuTabScreen ported in Screens/MenuTabScreen.swift.
 
-// MARK: - Sub-page stubs (Pairing, Calib, Upload, Download, Chatbot, Pin, BleError)
+// MARK: - Sub-page stubs (Pairing, Calib, Upload, Download, Pin, BleError)
 
 // PairingScreen ported in Screens/PairingScreen.swift.
 
@@ -49,7 +49,5 @@ struct StubCard<Content: View>: View {
 // UploadScreen ported in Screens/UploadScreen.swift.
 
 // DataDownloadScreen ported in Screens/DataDownloadScreen.swift.
-
-// ChatbotScreen ported in Screens/ChatbotScreen.swift.
 
 // PinScreen ported in Screens/PinScreen.swift.

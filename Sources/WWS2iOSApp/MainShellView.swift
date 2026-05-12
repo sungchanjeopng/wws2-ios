@@ -2,11 +2,23 @@
 //
 // Top-level container: TopBar + active tab/sub-page + BottomNavBar.
 // Sub-page priority over the tab itself (matches the Compose `when` ladder).
+// Optional assistant UI is intentionally excluded from this iOS port scope.
 
+import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 
 public struct MainShellView: View {
     @StateObject private var vm = AppViewModel()
+
+    @State private var showFirmwareImporter = false
+    @State private var showCsvImporter = false
+    @State private var showCsvExporter = false
+    @State private var csvExportFileName = "WESSWARE.csv"
+    @State private var csvExportDocument = CsvDocument()
+    @State private var sharePayload: SharePayload? = nil
+    @State private var fileImportError: FileImportError? = nil
 
     public init() {}
 
@@ -19,10 +31,8 @@ public struct MainShellView: View {
                     title: vm.currentTitle,
                     showBack: vm.state.tabIndex == 4 && vm.state.subPage != nil,
                     rxBlink: vm.state.rxBlink,
-                    aiActive: false,
                     onBackTap: { vm.handleTopBarBack() },
-                    onBleTap: { vm.openPairing() },
-                    onChatTap: { vm.openChatbot() }
+                    onBleTap: { vm.openPairing() }
                 )
 
                 bodyContent
@@ -45,15 +55,41 @@ public struct MainShellView: View {
                 .transition(.opacity)
             }
         }
+        .fileImporter(
+            isPresented: $showFirmwareImporter,
+            allowedContentTypes: [.data, .item],
+            allowsMultipleSelection: false,
+            onCompletion: handleFirmwareImport
+        )
+        .fileImporter(
+            isPresented: $showCsvImporter,
+            allowedContentTypes: [.commaSeparatedText, .plainText, .data],
+            allowsMultipleSelection: false,
+            onCompletion: handleCsvImport
+        )
+        .fileExporter(
+            isPresented: $showCsvExporter,
+            document: csvExportDocument,
+            contentType: .commaSeparatedText,
+            defaultFilename: csvExportFileName,
+            onCompletion: { _ in }
+        )
+        .sheet(item: $sharePayload) { payload in
+            ActivityView(activityItems: [payload.url])
+        }
         .alert(item: $vm.bleError) { err in
-            // SwiftUI Alert (replaces Compose BleErrorDialog)
-            // Note: BleErrorState needs Identifiable conformance in AppViewModel
-            // — will be added when wiring BLE flow.
-            return Alert(
+            Alert(
                 title: Text("BLE Error"),
                 message: Text(err.message),
                 primaryButton: .default(Text("Retry"), action: { vm.retryBleError() }),
                 secondaryButton: .cancel(Text("Dismiss"), action: { vm.dismissBleError() })
+            )
+        }
+        .alert(item: $fileImportError) { err in
+            Alert(
+                title: Text("File Error"),
+                message: Text(err.message),
+                dismissButton: .default(Text("OK"))
             )
         }
     }
@@ -64,9 +100,15 @@ public struct MainShellView: View {
             switch sub {
             case "pairing":  PairingScreen(vm: vm)
             case "calib":    CalibScreen(vm: vm)
-            case "upload":   UploadScreen(vm: vm)
-            case "chatbot":  ChatbotScreen(vm: vm)
-            case "download": DataDownloadScreen(vm: vm)
+            case "upload":
+                UploadScreen(vm: vm, onPickFile: { showFirmwareImporter = true })
+            case "download":
+                DataDownloadScreen(
+                    vm: vm,
+                    onPickCsv: { showCsvImporter = true },
+                    onShare: presentShareSheet,
+                    onSave: presentCsvExporter
+                )
             default:         MenuTabScreen(vm: vm)
             }
         } else {
@@ -80,9 +122,126 @@ public struct MainShellView: View {
             }
         }
     }
+
+    private func handleFirmwareImport(_ result: Result<[URL], Error>) {
+        guard let url = selectedUrl(from: result) else { return }
+        guard let data = readSecurityScopedData(from: url) else {
+            fileImportError = FileImportError(message: "Unable to read firmware file: \(url.lastPathComponent)")
+            return
+        }
+        vm.setPickedFile(name: url.lastPathComponent, size: data.count, bytes: Array(data))
+    }
+
+    private func handleCsvImport(_ result: Result<[URL], Error>) {
+        guard let url = selectedUrl(from: result) else { return }
+        let name = url.lastPathComponent
+        guard name.lowercased().hasSuffix(".csv") else {
+            fileImportError = FileImportError(message: "CSV files only: \(name)")
+            return
+        }
+        guard isSupportedWessCsvName(name) else {
+            fileImportError = FileImportError(message: "ENV130 or ENV230 CSV files only: \(name)")
+            return
+        }
+        guard let data = readSecurityScopedData(from: url) else {
+            fileImportError = FileImportError(message: "Unable to read CSV file: \(name)")
+            return
+        }
+        guard let content = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .isoLatin1) else {
+            fileImportError = FileImportError(message: "Unsupported CSV text encoding: \(name)")
+            return
+        }
+        vm.importCsvFile(name: name, size: data.count, content: content)
+    }
+
+    private func presentShareSheet() {
+        guard let url = vm.shareDataFile() else {
+            fileImportError = FileImportError(message: "No CSV data available to share.")
+            return
+        }
+        sharePayload = SharePayload(url: url)
+    }
+
+    private func presentCsvExporter() {
+        guard let (fileName, content) = vm.getCsvContentForSave() else {
+            fileImportError = FileImportError(message: "No CSV data available to save.")
+            return
+        }
+        csvExportFileName = fileName
+        csvExportDocument = CsvDocument(text: content)
+        showCsvExporter = true
+    }
+
+    private func selectedUrl(from result: Result<[URL], Error>) -> URL? {
+        switch result {
+        case .success(let urls):
+            return urls.first
+        case .failure(let error):
+            fileImportError = FileImportError(message: error.localizedDescription)
+            return nil
+        }
+    }
+
+    private func readSecurityScopedData(from url: URL) -> Data? {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed { url.stopAccessingSecurityScopedResource() }
+        }
+        return try? Data(contentsOf: url)
+    }
+
+    private func isSupportedWessCsvName(_ name: String) -> Bool {
+        let upper = name.uppercased()
+        if upper.contains("ENV130") || upper.contains("ENV230") { return true }
+        return name.range(of: #"ENV\d+_A\d{2}"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
 }
 
 // Make BleErrorState identifiable for SwiftUI .alert(item:)
 extension BleErrorState: Identifiable {
     public var id: String { retryAddress + message }
+}
+
+private struct SharePayload: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct FileImportError: Identifiable {
+    let id = UUID()
+    let message: String
+}
+
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+private struct CsvDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.commaSeparatedText, .plainText] }
+
+    var text: String
+
+    init(text: String = "") {
+        self.text = text
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        if let data = configuration.file.regularFileContents,
+           let content = String(data: data, encoding: .utf8) {
+            text = content
+        } else {
+            text = ""
+        }
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
+    }
 }
