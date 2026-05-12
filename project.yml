@@ -25,6 +25,11 @@ targets:
       path: iOSApp/Info.plist
       properties:
         CFBundleDisplayName: WESSWARE
+        NSBluetoothAlwaysUsageDescription: WESSWARE 장비와 BLE로 연결하기 위해 Bluetooth 권한이 필요합니다.
+        NSBluetoothPeripheralUsageDescription: WESSWARE 장비와 BLE로 연결하기 위해 Bluetooth 권한이 필요합니다.
+        NSLocationWhenInUseUsageDescription: WESSWARE 장비 검색/연결 기능에 위치 권한이 필요할 수 있습니다.
+        UIBackgroundModes:
+          - bluetooth-central
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
