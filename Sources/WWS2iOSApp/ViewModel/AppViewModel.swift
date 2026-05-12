@@ -103,7 +103,14 @@ public final class AppViewModel: ObservableObject {
     @Published public var showPinForPairing: Bool = false
     @Published public var bleError: BleErrorState? = nil
 
-    public let scanner = BleScanner()
+    /// Lazily create CoreBluetooth only when the pairing flow actually needs it.
+    ///
+    /// Creating `CBCentralManager` during app launch can make iOS kill the app
+    /// immediately if the built target is missing the Bluetooth usage string in
+    /// its final Info.plist. Deferring creation keeps the app shell launchable
+    /// and makes Bluetooth permission failures easier to diagnose from the
+    /// Pairing screen.
+    public private(set) lazy var scanner = BleScanner()
 
     /// Per-device BLE sessions and their support state. All accessed on
     /// MainActor since the class is @MainActor and CBCentralManager's
