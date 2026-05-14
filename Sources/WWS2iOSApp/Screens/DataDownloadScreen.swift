@@ -278,10 +278,10 @@ private struct DensityViewStage: View {
             avgDst = records.map(\.dst).reduce(0, +) / Double(records.count)
         }
         return ScrollView {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 FileInfoCard(file: file)
                 TrendChart(records: records, densUnit: densUnit, tempUnit: tempUnit)
-                    .frame(maxWidth: .infinity, minHeight: 280)
+                    .frame(maxWidth: .infinity, minHeight: 420)
                 StatRow(items: [
                     StatItem(label: "Min",
                              value: records.isEmpty ? "--" : dUnit.format(raw: minDst),
@@ -295,8 +295,8 @@ private struct DensityViewStage: View {
                 ])
                 ShareButton(onShare: onShare)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
         }
     }
 }
@@ -310,15 +310,15 @@ private struct InterfaceViewStage: View {
         let lightValues = records.map { $0.dst * 0.01 }
         let heavyValues = records.map { Double($0.eeaD) * 0.01 }
         return ScrollView {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 FileInfoCard(file: file)
                 InterfaceTrendChart(records: records, tempUnit: tempUnit)
-                    .frame(maxWidth: .infinity, minHeight: 280)
+                    .frame(maxWidth: .infinity, minHeight: 420)
                 downloadInterfaceStatCard(lightValues: lightValues, heavyValues: heavyValues)
                 ShareButton(onShare: onShare)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
         }
     }
 }
