@@ -12,8 +12,8 @@ import UIKit
 public struct MainShellView: View {
     @StateObject private var vm = AppViewModel()
 
-    @State private var showFirmwareImporter = false
-    @State private var showCsvImporter = false
+    @State private var showFileImporter = false
+    @State private var activeFileImportKind: FileImportKind? = nil
     @State private var showCsvExporter = false
     @State private var csvExportFileName = "WESSWARE.csv"
     @State private var csvExportDocument = CsvDocument()
@@ -56,16 +56,10 @@ public struct MainShellView: View {
             }
         }
         .fileImporter(
-            isPresented: $showFirmwareImporter,
-            allowedContentTypes: [.data, .item],
+            isPresented: $showFileImporter,
+            allowedContentTypes: activeFileImportKind == .csv ? [.commaSeparatedText, .plainText, .data] : [.data, .item],
             allowsMultipleSelection: false,
-            onCompletion: handleFirmwareImport
-        )
-        .fileImporter(
-            isPresented: $showCsvImporter,
-            allowedContentTypes: [.commaSeparatedText, .plainText, .data],
-            allowsMultipleSelection: false,
-            onCompletion: handleCsvImport
+            onCompletion: handleFileImport
         )
         .fileExporter(
             isPresented: $showCsvExporter,
@@ -101,11 +95,11 @@ public struct MainShellView: View {
             case "pairing":  PairingScreen(vm: vm)
             case "calib":    CalibScreen(vm: vm)
             case "upload":
-                UploadScreen(vm: vm, onPickFile: { showFirmwareImporter = true })
+                UploadScreen(vm: vm, onPickFile: { presentFileImporter(.firmware) })
             case "download":
                 DataDownloadScreen(
                     vm: vm,
-                    onPickCsv: { showCsvImporter = true },
+                    onPickCsv: { presentFileImporter(.csv) },
                     onShare: presentShareSheet,
                     onSave: presentCsvExporter
                 )
@@ -120,6 +114,25 @@ public struct MainShellView: View {
             case 4: MenuTabScreen(vm: vm)
             default: MainTabScreen(vm: vm)
             }
+        }
+    }
+
+    private func presentFileImporter(_ kind: FileImportKind) {
+        activeFileImportKind = kind
+        showFileImporter = true
+    }
+
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        let kind = activeFileImportKind
+        activeFileImportKind = nil
+
+        switch kind {
+        case .firmware:
+            handleFirmwareImport(result)
+        case .csv:
+            handleCsvImport(result)
+        case .none:
+            fileImportError = FileImportError(message: "File picker state was lost. Please tap Open again.")
         }
     }
 
@@ -211,6 +224,11 @@ private struct SharePayload: Identifiable {
 private struct FileImportError: Identifiable {
     let id = UUID()
     let message: String
+}
+
+private enum FileImportKind {
+    case firmware
+    case csv
 }
 
 private struct ActivityView: UIViewControllerRepresentable {

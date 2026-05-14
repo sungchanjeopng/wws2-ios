@@ -193,6 +193,7 @@ public struct FileSelectArea: View {
             .padding(.horizontal, 20)
             .background(AppColors.white)
             .clipShape(RoundedRectangle(cornerRadius: 14))
+            .contentShape(RoundedRectangle(cornerRadius: 14))
             .overlay(
                 RoundedRectangle(cornerRadius: 14)
                     .stroke(AppColors.border, lineWidth: 1.5)
