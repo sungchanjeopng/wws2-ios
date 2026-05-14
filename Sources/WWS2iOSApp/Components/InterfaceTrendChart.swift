@@ -1,7 +1,7 @@
 // Ported from app/src/main/java/com/wws2/densitymeter/ui/component/InterfaceTrendChart.kt
 //
 // Interface-meter trend chart with Android-like interaction:
-// - pinch zoom in/out (1x...10x)
+// - axis-specific pinch zoom in/out (horizontal fingers -> X only, vertical fingers -> Y only)
 // - one-finger pan after zoom
 // - long press / hold crosshair tooltip
 // - double tap reset
@@ -21,7 +21,6 @@ public struct InterfaceTrendChart: View {
     @State private var scaleY: CGFloat = 1
     @State private var offsetX: CGFloat = 0
     @State private var offsetY: CGFloat = 0
-    @State private var lastMagnification: CGFloat = 1
     @State private var touchPos: CGPoint? = nil
 
     public init(records: [TrendRecord], tempUnit: Int = 0) {
@@ -37,8 +36,15 @@ public struct InterfaceTrendChart: View {
                 }
                 .contentShape(Rectangle())
                 .gesture(chartDragGesture(size: geo.size))
-                .simultaneousGesture(chartMagnificationGesture(size: geo.size))
                 .simultaneousGesture(TapGesture(count: 2).onEnded { resetZoom() })
+                .overlay {
+                    AxisPinchOverlay { xDelta, yDelta, center in
+                        zoom(xDelta: xDelta, yDelta: yDelta, center: center, size: geo.size)
+                        touchPos = nil
+                    } onEnded: {
+                        touchPos = nil
+                    }
+                }
 
                 if scaleX > 1.01 || scaleY > 1.01 {
                     Button(action: resetZoom) {
@@ -85,25 +91,14 @@ public struct InterfaceTrendChart: View {
             .onEnded { _ in touchPos = nil }
     }
 
-    private func chartMagnificationGesture(size: CGSize) -> some Gesture {
-        MagnificationGesture()
-            .onChanged { value in
-                let delta = value / max(lastMagnification, 0.001)
-                lastMagnification = value
-                zoom(by: delta, center: CGPoint(x: size.width / 2, y: size.height / 2), size: size)
-                touchPos = nil
-            }
-            .onEnded { _ in lastMagnification = 1 }
-    }
-
-    private func zoom(by delta: CGFloat, center: CGPoint, size: CGSize) {
+    private func zoom(xDelta: CGFloat, yDelta: CGFloat, center: CGPoint, size: CGSize) {
         let margins = chartMargins(totalH: size.height)
         let baseW = max(1, size.width - margins.left - margins.right)
         let baseH = max(1, size.height - margins.top - margins.bottom)
         let oldSx = scaleX
         let oldSy = scaleY
-        scaleX = min(max(scaleX * delta, 1), 10)
-        scaleY = min(max(scaleY * delta, 1), 10)
+        scaleX = min(max(scaleX * xDelta, 1), 10)
+        scaleY = min(max(scaleY * yDelta, 1), 10)
         let cx = center.x - margins.left
         let cy = center.y - margins.top
         if oldSx > 0 { offsetX = cx - (cx - offsetX) * scaleX / oldSx }
@@ -113,7 +108,7 @@ public struct InterfaceTrendChart: View {
     }
 
     private func resetZoom() {
-        scaleX = 1; scaleY = 1; offsetX = 0; offsetY = 0; lastMagnification = 1; touchPos = nil
+        scaleX = 1; scaleY = 1; offsetX = 0; offsetY = 0; touchPos = nil
     }
 
     private func clampOffset(_ value: CGFloat, base: CGFloat, scale: CGFloat) -> CGFloat {
