@@ -295,7 +295,7 @@ private struct DensityViewStage: View {
                 ])
                 ShareButton(onShare: onShare)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 2)
             .padding(.vertical, 8)
         }
     }
@@ -317,7 +317,7 @@ private struct InterfaceViewStage: View {
                 downloadInterfaceStatCard(lightValues: lightValues, heavyValues: heavyValues)
                 ShareButton(onShare: onShare)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 2)
             .padding(.vertical, 8)
         }
     }

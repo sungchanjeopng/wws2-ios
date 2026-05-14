@@ -39,7 +39,8 @@ public struct TrendTabScreen: View {
 
                 statsArea(isInterface: isInterface, records: records, valueLabel: valueLabel)
             }
-            .padding(8)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 6)
         }
     }
 

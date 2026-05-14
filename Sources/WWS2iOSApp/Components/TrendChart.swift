@@ -53,8 +53,8 @@ public struct TrendChart: View {
                 }
             }
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 8)
+        .padding(.leading, 2)
+        .padding(.trailing, 2)
         .padding(.top, 6)
         .padding(.bottom, 4)
         .background(AppColors.white)
@@ -119,7 +119,7 @@ public struct TrendChart: View {
     }
 
     private func chartMargins(totalH: CGFloat) -> (left: CGFloat, right: CGFloat, top: CGFloat, bottom: CGFloat) {
-        (54, 54, max(38, min(58, totalH * 0.08)), max(42, min(58, totalH * 0.09)))
+        (42, 42, max(38, min(58, totalH * 0.08)), max(42, min(58, totalH * 0.09)))
     }
 
     private func draw(context ctx: GraphicsContext, size: CGSize) {
@@ -222,10 +222,10 @@ public struct TrendChart: View {
             let t = start + (end - start) * Double(i) / Double(labelCount - 1)
             let comps = utcCal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: Date(timeIntervalSince1970: t))
             let text = String(format: "%02d:%02d:%02d\n%02d/%02d/%02d", comps.hour ?? 0, comps.minute ?? 0, comps.second ?? 0, (comps.year ?? 0) % 100, comps.month ?? 0, comps.day ?? 0)
-            let resolved = context.resolve(Text(text).font(.system(size: 11)).foregroundColor(AppColors.grayLabel))
+            let resolved = context.resolve(Text(text).font(.system(size: 9)).foregroundColor(AppColors.grayLabel))
             let ms = resolved.measure(in: size)
             let rawX = marginLeft + baseW * CGFloat(i) / CGFloat(labelCount - 1)
-            let x = i == 0 ? rawX + 20 : (i == labelCount - 1 ? rawX - 20 : rawX)
+            let x = i == 0 ? rawX + 12 : (i == labelCount - 1 ? rawX - 12 : rawX)
             var p = Path(); p.move(to: CGPoint(x: x, y: marginTop)); p.addLine(to: CGPoint(x: x, y: marginTop + baseH))
             context.stroke(p, with: .color(Color(hex: 0xCCCCCC)), style: dashStyle)
             let cx = max(marginLeft, min(marginLeft + baseW - ms.width, x - ms.width / 2))
