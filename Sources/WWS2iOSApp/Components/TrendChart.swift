@@ -28,9 +28,9 @@ public struct TrendChart: View {
         Canvas { context, size in
             draw(context: context, size: size)
         }
-        .padding(.leading, 12)
-        .padding(.trailing, 12)
-        .padding(.top, 8)
+        .padding(.leading, 8)
+        .padding(.trailing, 8)
+        .padding(.top, 6)
         .padding(.bottom, 4)
         .background(AppColors.white)
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -44,10 +44,10 @@ public struct TrendChart: View {
         let dUnit = DensityUnit.fromInt(densUnit)
         let tUnit = TemperatureUnit.fromInt(tempUnit)
 
-        let marginLeft: CGFloat = 70
-        let marginRight: CGFloat = 70
-        let marginTop: CGFloat = max(60, min(110, totalH * 0.1))
-        let marginBottom: CGFloat = marginTop
+        let marginLeft: CGFloat = 54
+        let marginRight: CGFloat = 54
+        let marginTop: CGFloat = max(38, min(58, totalH * 0.08))
+        let marginBottom: CGFloat = max(42, min(58, totalH * 0.09))
 
         let baseW = totalW - marginLeft - marginRight
         let baseH = totalH - marginTop - marginBottom

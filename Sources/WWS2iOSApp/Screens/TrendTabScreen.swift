@@ -25,7 +25,7 @@ public struct TrendTabScreen: View {
                 onOpenPairing: { vm.openPairing() }
             )
         } else {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 DeviceStripBar(
                     devices: devices,
                     selectedDeviceId: activeId,
@@ -35,10 +35,11 @@ public struct TrendTabScreen: View {
 
                 chartArea(isInterface: isInterface, records: records)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
 
                 statsArea(isInterface: isInterface, records: records, valueLabel: valueLabel)
             }
-            .padding(12)
+            .padding(8)
         }
     }
 
