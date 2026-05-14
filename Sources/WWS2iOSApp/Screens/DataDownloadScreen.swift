@@ -40,7 +40,7 @@ private struct ListStage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Download")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .kerning(0.3)
                     .foregroundStyle(AppColors.grayLabel)
                 Spacer().frame(height: 10)
@@ -48,18 +48,18 @@ private struct ListStage: View {
                 CardContainer {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Target Device")
-                            .font(.system(size: 13, weight: .bold))
+                            .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(AppColors.grayLabel)
                         if vm.state.connectedDevices.isEmpty {
                             HStack(spacing: 8) {
                                 Circle().fill(AppColors.weakText).frame(width: 9, height: 9)
                                 Text("No device connected")
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(AppColors.grayLabel)
                             }
                             Button(action: {}) {
                                 Text("Download")
-                                    .font(.system(size: 18, weight: .bold))
+                                    .font(.system(size: 15, weight: .bold))
                                     .foregroundStyle(.white)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 13)
@@ -74,12 +74,12 @@ private struct ListStage: View {
                                     HStack(spacing: 8) {
                                         Circle().fill(AppColors.success).frame(width: 9, height: 9)
                                         Text(dev.label)
-                                            .font(.system(size: 16, weight: .semibold))
+                                            .font(.system(size: 13, weight: .semibold))
                                             .foregroundStyle(AppColors.darkText)
                                     }
                                     Button(action: { vm.activateAndDownload(dev.id) }) {
                                         Text("Download")
-                                            .font(.system(size: 18, weight: .bold))
+                                            .font(.system(size: 15, weight: .bold))
                                             .foregroundStyle(.white)
                                             .frame(maxWidth: .infinity)
                                             .padding(.vertical, 13)
@@ -98,7 +98,7 @@ private struct ListStage: View {
 
                 Spacer().frame(height: 18)
                 Text("Open")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .kerning(0.3)
                     .foregroundStyle(AppColors.grayLabel)
                 Spacer().frame(height: 10)
@@ -106,7 +106,7 @@ private struct ListStage: View {
 
                 Spacer().frame(height: 20)
                 Text("SAVED FILES")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .kerning(0.3)
                     .foregroundStyle(AppColors.grayLabel)
                 Spacer().frame(height: 10)
@@ -114,7 +114,7 @@ private struct ListStage: View {
                 if vm.state.savedDataFiles.isEmpty {
                     CardContainer {
                         Text("No saved files yet.")
-                            .font(.system(size: 16))
+                            .font(.system(size: 11))
                             .foregroundStyle(AppColors.grayLabel)
                     }
                 } else {
@@ -144,15 +144,15 @@ private struct DownloadingStage: View {
                 ZStack {
                     Circle().fill(AppColors.primary.opacity(0.08)).frame(width: 72, height: 72)
                     Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 32))
+                        .font(.system(size: 28))
                         .foregroundStyle(AppColors.primary)
                 }
                 Spacer().frame(height: 20)
                 Text("Downloading...")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(AppColors.darkText)
                 Text("Receiving log data from the device.")
-                    .font(.system(size: 16))
+                    .font(.system(size: 13))
                     .foregroundStyle(AppColors.grayLabel)
                     .multilineTextAlignment(.center)
                     .padding(.top, 6)
@@ -168,7 +168,7 @@ private struct DownloadingStage: View {
                 Spacer().frame(height: 18)
                 Button(action: { vm.cancelDataDownload() }) {
                     Text("Cancel")
-                        .font(.system(size: 18, weight: .bold))
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
@@ -198,20 +198,20 @@ private struct CompleteStage: View {
                 ZStack {
                     Circle().fill(AppColors.success.opacity(0.08)).frame(width: 72, height: 72)
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 32))
+                        .font(.system(size: 28))
                         .foregroundStyle(AppColors.success)
                 }
                 Spacer().frame(height: 20)
                 Text("Download Complete")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(AppColors.darkText)
                 Text("The CSV file is ready to view or share.")
-                    .font(.system(size: 16))
+                    .font(.system(size: 13))
                     .foregroundStyle(AppColors.grayLabel)
                     .multilineTextAlignment(.center)
                     .padding(.top, 6)
                 Text("Auto-saved: Documents/WESSWARE/\(file?.name ?? "")")
-                    .font(.system(size: 12))
+                    .font(.system(size: 10))
                     .foregroundStyle(AppColors.weakText)
                     .multilineTextAlignment(.center)
                     .padding(.top, 6)
@@ -228,7 +228,7 @@ private struct CompleteStage: View {
                 Spacer().frame(height: 18)
                 Button(action: { if let f = file { vm.viewDataFile(f) } }) {
                     Text("View Data")
-                        .font(.system(size: 18, weight: .bold))
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
@@ -362,9 +362,9 @@ private struct DownloadStatCell: View {
     let color: Color
     var body: some View {
         VStack(spacing: 4) {
-            Text(label).font(.system(size: 13, weight: .semibold)).foregroundStyle(AppColors.grayLabel)
+            Text(label).font(.system(size: 11, weight: .semibold)).foregroundStyle(AppColors.grayLabel)
                 .multilineTextAlignment(.center)
-            Text(value).font(.system(size: 20, weight: .bold)).kerning(-0.5).foregroundStyle(color)
+            Text(value).font(.system(size: 16, weight: .bold)).kerning(-0.4).foregroundStyle(color)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
@@ -383,15 +383,15 @@ private struct ErrorStage: View {
                 ZStack {
                     Circle().fill(downloadRed.opacity(0.08)).frame(width: 72, height: 72)
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 32))
+                        .font(.system(size: 28))
                         .foregroundStyle(downloadRed)
                 }
                 Spacer().frame(height: 20)
                 Text("Download Failed")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(AppColors.darkText)
                 Text(vm.state.trendError ?? "Unknown error")
-                    .font(.system(size: 15))
+                    .font(.system(size: 13))
                     .foregroundStyle(AppColors.grayLabel)
                     .multilineTextAlignment(.center)
                     .padding(.top, 8)
@@ -399,7 +399,7 @@ private struct ErrorStage: View {
                 Spacer().frame(height: 28)
                 Button(action: { vm.openDataFilesList() }) {
                     Text("Back")
-                        .font(.system(size: 18, weight: .bold))
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
@@ -425,7 +425,7 @@ private struct FileCard: View {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12).fill(AppColors.background).frame(width: 40, height: 40)
-                    Image(systemName: "doc.text").font(.system(size: 18, weight: .semibold))
+                    Image(systemName: "doc.text").font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(AppColors.primary)
                 }
                 VStack(alignment: .leading, spacing: 4) {
@@ -434,14 +434,14 @@ private struct FileCard: View {
                         .foregroundStyle(AppColors.darkText)
                         .lineLimit(1)
                     Text("\(file.recordCount) records / \(file.rangeLabel)")
-                        .font(.system(size: 12))
+                        .font(.system(size: 10))
                         .foregroundStyle(AppColors.grayLabel)
                     Text(formatBytes(file.sizeBytes))
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundStyle(AppColors.weakText)
                 }
                 Spacer()
-                Image(systemName: "chevron.right").font(.system(size: 14)).foregroundStyle(AppColors.grayLabel)
+                Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(AppColors.grayLabel)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -461,9 +461,9 @@ private struct ProgressCard: View {
     var body: some View {
         CardContainer {
             VStack(alignment: .leading, spacing: 0) {
-                Text(fileName).font(.system(size: 16, weight: .bold)).foregroundStyle(AppColors.darkText)
+                Text(fileName).font(.system(size: 13, weight: .bold)).foregroundStyle(AppColors.darkText)
                 Spacer().frame(height: 6)
-                Text(subtitle).font(.system(size: 13)).foregroundStyle(AppColors.grayLabel)
+                Text(subtitle).font(.system(size: 11)).foregroundStyle(AppColors.grayLabel)
                 Spacer().frame(height: 14)
                 ProgressView(value: progress, total: 1.0)
                     .progressViewStyle(.linear)
@@ -472,7 +472,7 @@ private struct ProgressCard: View {
                     .clipShape(Capsule())
                 Spacer().frame(height: 8)
                 Text("\(Int(progress * 100))%")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(AppColors.primary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -486,10 +486,10 @@ private struct TargetDeviceCard: View {
         CardContainer {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Target Device")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(AppColors.grayLabel)
                 Text(targetDevice)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppColors.darkText)
             }
         }
@@ -502,17 +502,17 @@ private struct FileInfoCard: View {
         CardContainer {
             VStack(alignment: .leading, spacing: 8) {
                 Text(file?.name ?? "--")
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(AppColors.darkText)
                 HStack(spacing: 12) {
                     Text("\(file?.recordCount ?? 0) records")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(AppColors.grayLabel)
                     Text(file?.rangeLabel ?? "--")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(AppColors.grayLabel)
                     Text(formatBytes(file?.sizeBytes ?? 0))
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(AppColors.grayLabel)
                 }
             }
@@ -525,7 +525,7 @@ private struct ShareButton: View {
     var body: some View {
         Button(action: onShare) {
             Text("Share")
-                .font(.system(size: 18, weight: .bold))
+                .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)

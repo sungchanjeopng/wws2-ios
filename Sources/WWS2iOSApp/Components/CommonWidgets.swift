@@ -181,15 +181,15 @@ public struct FileSelectArea: View {
                         .fill(AppColors.background)
                         .frame(width: 40, height: 40)
                     Image(systemName: "folder")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(AppColors.primary)
                 }
                 Text("Open")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(AppColors.primary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 22)
+            .padding(.vertical, 18)
             .padding(.horizontal, 20)
             .background(AppColors.white)
             .clipShape(RoundedRectangle(cornerRadius: 14))
