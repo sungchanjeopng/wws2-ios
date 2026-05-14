@@ -4,6 +4,8 @@ import UIKit
 /// Transparent UIKit bridge for Android-like axis-specific two-finger zoom.
 /// - Horizontal finger spread changes only X zoom.
 /// - Vertical finger spread changes only Y zoom.
+/// - Zoom sensitivity is damped for a stock-chart-like feel.
+/// - The pinch center is forwarded so charts expand around the user's fingers.
 ///
 /// The recognizer is attached to the SwiftUI host/superview instead of this
 /// transparent overlay view so one-finger SwiftUI drag/crosshair gestures still work.
@@ -64,6 +66,8 @@ struct AxisPinchOverlay: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let zoomSensitivity: CGFloat = 0.72
+
         var onChanged: (_ scaleXDelta: CGFloat, _ scaleYDelta: CGFloat, _ center: CGPoint) -> Void
         var onEnded: () -> Void
         private var lastHorizontalDistance: CGFloat?
@@ -105,9 +109,9 @@ struct AxisPinchOverlay: UIViewRepresentable {
                 let verticalChange = abs(verticalDistance - lastV)
 
                 if horizontalChange >= verticalChange {
-                    onChanged(horizontalDistance / max(lastH, 1), 1, center)
+                    onChanged(applySensitivity(horizontalDistance / max(lastH, 1)), 1, center)
                 } else {
-                    onChanged(1, verticalDistance / max(lastV, 1), center)
+                    onChanged(1, applySensitivity(verticalDistance / max(lastV, 1)), center)
                 }
 
                 lastHorizontalDistance = horizontalDistance
@@ -127,6 +131,11 @@ struct AxisPinchOverlay: UIViewRepresentable {
         private func reset() {
             lastHorizontalDistance = nil
             lastVerticalDistance = nil
+        }
+
+        private func applySensitivity(_ delta: CGFloat) -> CGFloat {
+            guard delta > 0 else { return 1 }
+            return CGFloat(pow(Double(delta), Double(zoomSensitivity)))
         }
     }
 }

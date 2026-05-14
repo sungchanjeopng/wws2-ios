@@ -1,7 +1,7 @@
 // Ported from app/src/main/java/com/wws2/densitymeter/ui/component/TrendChart.kt
 //
 // Density-meter trend chart with Android-like interaction:
-// - axis-specific pinch zoom in/out (horizontal fingers -> X only, vertical fingers -> Y only)
+// - axis-specific pinch zoom in/out around pinch center (horizontal fingers -> X only, vertical fingers -> Y only)
 // - one-finger pan after zoom
 // - long press / hold crosshair tooltip
 // - double tap reset
