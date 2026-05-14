@@ -785,18 +785,52 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func activateAndDownload(_ deviceId: String) {
-        requestConnectDevice(deviceId)
+        guard let connected = state.connectedDevices.first(where: { $0.id == deviceId }),
+              let gatt = gattClients[deviceId]
+        else {
+            state.trendError = "Device not connected."
+            state.dataFilesStage = .error
+            return
+        }
+
+        // Match the Android reference: the Download button first promotes the
+        // selected connected device to active, creates the placeholder CSV item,
+        // clears RX, arms the trend parser, waits briefly, then sends CMD 0x0007
+        // / 0x0017 exactly once. The normal 1 Hz heartbeat is suppressed while
+        // the Data Files subpage is open, so simply viewing this screen cannot
+        // start a transfer.
+        state.activeDeviceId = connected.id
+        state.activeDeviceLabel = connected.label
+        state.deviceType = connected.deviceType == 1 ? .interface_ : .density
+
+        let useCase = ExportCsvUseCase()
+        let stamp = useCase.formatDateStamp(Date())
+        let filename = "\(connected.label)_\(stamp).csv"
+        let placeholder = DataFileItem(
+            name: filename,
+            recordCount: 0,
+            rangeLabel: "--",
+            sizeBytes: 0,
+            targetDevice: connected.label,
+            chartRecords: [],
+            allRecords: []
+        )
+
         state.dataFilesStage = .downloading
-        state.activeDataFile = nil
+        state.activeDataFile = placeholder
         state.downloadRecords = []
         state.trendExpectedRecords = 0
         state.dataDownloadProgress = 0
         state.trendError = nil
         state.isTrendStreaming = true
 
+        let physicalId = DeviceRouting.physicalDeviceId(for: deviceId)
+        rxBuffers[deviceId]?.removeAll(keepingCapacity: true)
+        rxBuffers[physicalId]?.removeAll(keepingCapacity: true)
+
         // Build a parser that funnels into download state.
         let parser = TrendStreamParser(
-            isInterface: state.connectedDevices.first(where: { $0.id == deviceId })?.deviceType == 1,
+            isInterface: connected.deviceType == 1,
             onRecordsParsed: { [weak self] records in
                 Task { @MainActor in
                     guard let self else { return }
@@ -839,9 +873,15 @@ public final class AppViewModel: ObservableObject {
         parser.startStream()
         trendParser = parser
 
-        // Send the trend download command so the device starts streaming.
         Task { @MainActor in
-            guard let gatt = self.gattClients[deviceId] else { return }
+            // Android waits 1 second after clearing stale RX before unmuting and
+            // sending the explicit download command.
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            self.rxBuffers[deviceId]?.removeAll(keepingCapacity: true)
+            self.rxBuffers[physicalId]?.removeAll(keepingCapacity: true)
+            guard self.state.isTrendStreaming,
+                  self.state.activeDeviceId == deviceId
+            else { return }
             let cmd = DeviceRouting.downloadCommand(for: deviceId)
             let frame = FrameCodec.buildHeartbeat(pageIndex: Int(cmd))
             _ = await gatt.write(data: frame, withoutResponse: true)
@@ -850,9 +890,10 @@ public final class AppViewModel: ObservableObject {
 
     private func persistDownloadedFile(deviceId: String) {
         let useCase = ExportCsvUseCase()
-        let label = state.connectedDevices.first { $0.id == deviceId }?.label ?? deviceLabelOrDefault
-        let stamp = useCase.formatDateStamp(Date())
-        let filename = "\(label)_\(stamp).csv"
+        let label = state.activeDataFile?.targetDevice
+            ?? state.connectedDevices.first { $0.id == deviceId }?.label
+            ?? deviceLabelOrDefault
+        let filename = state.activeDataFile?.name ?? "\(label)_\(useCase.formatDateStamp(Date())).csv"
         let isInterface = label.uppercased().contains("ENV130") || state.deviceType == .interface_
         let savedPath = useCase.saveCsvToDocuments(
             fileName: filename,
@@ -882,18 +923,28 @@ public final class AppViewModel: ObservableObject {
 
     public func cancelDataDownload() {
         let deviceId = state.activeDeviceId
-        if let gatt = gattClients[deviceId] {
-            let cmd = DeviceRouting.isCh2DeviceId(deviceId)
-                ? Command.cmdDownloadCancelCh2
-                : Command.cmdDownloadCancel
-            Task { @MainActor in
-                _ = await gatt.write(data: FrameCodec.buildHeartbeat(pageIndex: Int(cmd)), withoutResponse: true)
+        let gatt = gattClients[deviceId]
+        let cmd = DeviceRouting.isCh2DeviceId(deviceId)
+            ? Command.cmdDownloadCancelCh2
+            : Command.cmdDownloadCancel
+
+        Task { @MainActor in
+            // Android retransmits cancel a few times because the firmware can
+            // miss a frame while sending a burst chunk.
+            if let gatt {
+                let frame = FrameCodec.buildHeartbeat(pageIndex: Int(cmd))
+                for _ in 0..<5 {
+                    _ = await gatt.write(data: frame, withoutResponse: true)
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
             }
+            self.trendParser?.reset()
+            self.trendParser = nil
+            self.state.isTrendStreaming = false
+            self.state.dataFilesStage = .list
+            self.state.dataDownloadProgress = 0
+            self.state.downloadRecords = []
         }
-        trendParser?.reset()
-        trendParser = nil
-        state.isTrendStreaming = false
-        state.dataFilesStage = .list
     }
 
     public func viewDataFile(_ file: DataFileItem) {
