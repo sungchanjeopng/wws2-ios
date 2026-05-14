@@ -139,4 +139,10 @@ final class DeviceRoutingTests: XCTestCase {
             "density-1"
         )
     }
+
+    func testDownloadCommandMatchesAndroidForInterfaceChannels() {
+        XCTAssertEqual(DeviceRouting.downloadCommand(for: "peripheral-1_CH1"), Command.cmdDownload)
+        XCTAssertEqual(DeviceRouting.downloadCommand(for: "peripheral-1_CH2"), Command.cmdDownloadCh2)
+        XCTAssertEqual(DeviceRouting.downloadCommand(for: "density-1"), Command.cmdDownload)
+    }
 }

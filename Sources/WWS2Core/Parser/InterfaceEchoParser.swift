@@ -3,7 +3,7 @@
 // Stateful parser for multi-chunk interface echo waveforms.
 //
 // Lifecycle:
-//   1. Caller detects a 33-byte header packet in rxBuf and extracts it.
+//   1. Caller detects a 203-byte header packet in rxBuf and extracts it.
 //   2. Calls beginCollection(headerPkt:parsedCmd:).
 //   3. Repeatedly calls tryParseChunks(rxBuf:&) until it returns non-nil.
 //   4. On tab switch / error, calls reset().
@@ -11,6 +11,9 @@
 import Foundation
 
 public final class InterfaceEchoParser {
+
+    public static let semanticHeaderSize = 30
+    public static let headerPacketSize = 203
 
     /// 0 = idle, 1 = collecting_chunks
     public private(set) var state: Int = 0
@@ -27,12 +30,16 @@ public final class InterfaceEchoParser {
 
     public var isCollecting: Bool { state == 1 }
 
-    /// Begin collection from the 33-byte header packet (SOF + CMD + 30B header).
+    /// Begin collection from the 203-byte Android header packet
+    /// (SOF + CMD + 200B data; first 30B are semantic, remaining 170B reserved).
     public func beginCollection(headerPkt: [UInt8], parsedCmd: UInt16) {
-        precondition(headerPkt.count >= 33, "headerPkt must be 33 bytes")
+        precondition(
+            headerPkt.count >= Self.headerPacketSize,
+            "headerPkt must be at least \(Self.headerPacketSize) bytes"
+        )
 
-        // Extract 30B header data (skip SOF + CMD = 3 bytes).
-        headerData = Array(headerPkt[3..<33])
+        // Extract the 30-byte semantic header (skip SOF + CMD = 3 bytes).
+        headerData = Array(headerPkt[3..<(3 + Self.semanticHeaderSize)])
 
         // N = empty * 1.1, capped at 1100 (ADC_BUFF_MAX).
         let emptyVal = (Int(headerData[6]) << 8) | Int(headerData[7])
@@ -45,10 +52,11 @@ public final class InterfaceEchoParser {
         wave.removeAll(keepingCapacity: true)
         cmd = parsedCmd
 
-        // Initialize running CRC over the entire 33-byte header.
+        // Initialize running CRC over the full 203-byte header packet,
+        // including the reserved padding bytes used by Android/firmware.
         runningCrc = 0xFFFF
-        for i in 0..<33 {
-            runningCrc = Crc.crc16Update(runningCrc, headerPkt[i])
+        for byte in headerPkt {
+            runningCrc = Crc.crc16Update(runningCrc, byte)
         }
         state = 1
     }

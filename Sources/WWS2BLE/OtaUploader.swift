@@ -65,7 +65,10 @@ public final class OtaUploader {
         if Task.isCancelled { return OtaResult.timeout.rawValue }
         let startAckTask = Task { await awaitStartAck(10.0) }
         await Task.yield()
-        let wroteStart = await gatt.write(data: FrameCodec.makeStartFrame(), withoutResponse: true)
+        let wroteStart = await gatt.write(
+            data: FrameCodec.makeStartFrame(fileSizeBytes: data.count),
+            withoutResponse: true
+        )
         if !wroteStart { return OtaResult.timeout.rawValue }
 
         let acked = await startAckTask.value

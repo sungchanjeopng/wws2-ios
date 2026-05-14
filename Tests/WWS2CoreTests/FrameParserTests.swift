@@ -8,7 +8,7 @@ final class FrameParserTests: XCTestCase {
 
     func testExpectedDataSize() {
         XCTAssertEqual(FrameParser.expectedDataSize(cmd: 0x0000, isInterface: false), 34)
-        XCTAssertEqual(FrameParser.expectedDataSize(cmd: 0x0000, isInterface: true), 26)
+        XCTAssertEqual(FrameParser.expectedDataSize(cmd: 0x0000, isInterface: true), 200)
         XCTAssertEqual(FrameParser.expectedDataSize(cmd: 0x0001, isInterface: false), 224)
         XCTAssertEqual(FrameParser.expectedDataSize(cmd: 0x0001, isInterface: true), -1)
         XCTAssertEqual(FrameParser.expectedDataSize(cmd: 0x0003, isInterface: false), 30)
@@ -90,6 +90,46 @@ final class FrameParserTests: XCTestCase {
         XCTAssertEqual(freqMHz, 0.380, accuracy: 1e-9)   // 380 kHz
         XCTAssertEqual(tvg, 30)
         XCTAssertEqual(offset, -1.0, accuracy: 1e-9)
+        XCTAssertEqual(relay, 1)
+    }
+
+    func testParseInterfaceStatusFrom200BytePayloadUsesFirst26BytesOnly() {
+        var semanticBytes: [UInt8] = []
+        semanticBytes += u16(100)    // ch1Light → 1.00
+        semanticBytes += u16(250)    // ch1Heavy → 2.50
+        semanticBytes += s16(210)    // temp → 21.0
+        semanticBytes += u16(456)    // current → 4.56
+        semanticBytes += u16(2)      // freqIdx=2 → 160 kHz
+        semanticBytes += s16(25)     // offset → 0.25
+        semanticBytes += u16(40)     // set4mA → 0.40
+        semanticBytes += u16(1200)   // set20mA → 12.00
+        semanticBytes += u16(11)     // tvg
+        semanticBytes += u16(7)      // damping
+        semanticBytes += u16(9)      // asf
+        semanticBytes += u16(1)      // relay
+        semanticBytes += u16(3)      // errorCode
+        XCTAssertEqual(semanticBytes.count, 26)
+
+        let payload = semanticBytes + Array(repeating: 0xAB, count: 174)
+        XCTAssertEqual(payload.count, 200)
+
+        let result = FrameParser.parse(cmd: 0x0010, data: payload, isInterface: true)
+        guard case .interfaceStatus(let reading, let temperature, let currentMA, let damping,
+                                    let set4mA, let set20mA, let freqMHz, let tvg,
+                                    let offset, let asf, let relay, _) = result else {
+            return XCTFail("expected .interfaceStatus from 200-byte interface payload")
+        }
+        XCTAssertEqual(reading.level, 1.0, accuracy: 1e-9)
+        XCTAssertEqual(reading.heavyLevel ?? -1.0, 2.5, accuracy: 1e-9)
+        XCTAssertEqual(temperature, 21.0, accuracy: 1e-9)
+        XCTAssertEqual(currentMA, 4.56, accuracy: 1e-9)
+        XCTAssertEqual(damping, 7)
+        XCTAssertEqual(set4mA, 0.40, accuracy: 1e-9)
+        XCTAssertEqual(set20mA, 12.0, accuracy: 1e-9)
+        XCTAssertEqual(freqMHz, 0.160, accuracy: 1e-9)
+        XCTAssertEqual(tvg, 11)
+        XCTAssertEqual(offset, 0.25, accuracy: 1e-9)
+        XCTAssertEqual(asf, 9)
         XCTAssertEqual(relay, 1)
     }
 

@@ -24,7 +24,9 @@ public final class TrendStreamParser {
 
     private var runningCrc: UInt16 = 0xFFFF
     private static let recSize = 24
+    private static let interfaceRecSize = InterfaceTrendRecord.recordSize
 
+    private let isInterface: Bool
     private let onRecordsParsed: RecordsParsed
     private let onHeaderParsed:  HeaderParsed
     private let onComplete:      Complete
@@ -32,12 +34,14 @@ public final class TrendStreamParser {
     private let onError:         ErrorReport
 
     public init(
+        isInterface: Bool = false,
         onRecordsParsed: @escaping RecordsParsed,
         onHeaderParsed:  @escaping HeaderParsed,
         onComplete:      @escaping Complete,
         onCrcFail:       @escaping CrcFail,
         onError:         @escaping ErrorReport
     ) {
+        self.isInterface = isInterface
         self.onRecordsParsed = onRecordsParsed
         self.onHeaderParsed  = onHeaderParsed
         self.onComplete      = onComplete
@@ -112,16 +116,17 @@ public final class TrendStreamParser {
 
     private func parseChunks(rxBuf: inout [UInt8], downloadedCount: Int) {
         var newRecords: [TrendRecord] = []
+        let recSize = isInterface ? Self.interfaceRecSize : Self.recSize
 
-        while downloadedCount + newRecords.count < totalRecords && rxBuf.count >= Self.recSize {
-            let recBytes = Array(rxBuf[0..<Self.recSize])
-            rxBuf.removeFirst(Self.recSize)
+        while downloadedCount + newRecords.count < totalRecords && rxBuf.count >= recSize {
+            let recBytes = Array(rxBuf[0..<recSize])
+            rxBuf.removeFirst(recSize)
 
             for b in recBytes {
                 runningCrc = Crc.crc16Update(runningCrc, b)
             }
 
-            if let rec = TrendRecord.fromBytes(recBytes) {
+            if let rec = parseRecord(recBytes) {
                 newRecords.append(rec)
             }
         }
@@ -144,5 +149,18 @@ public final class TrendStreamParser {
             streamState = 0
             onComplete()
         }
+    }
+
+    private func parseRecord(_ recBytes: [UInt8]) -> TrendRecord? {
+        if isInterface {
+            guard let record = InterfaceTrendRecord.fromBytes(recBytes) else { return nil }
+            return TrendRecord(
+                dateTime: record.dateTime,
+                eeaD: Int(record.ch1Heavy * 100.0),
+                dst: record.ch1Light,
+                temperature: 0.0
+            )
+        }
+        return TrendRecord.fromBytes(recBytes)
     }
 }

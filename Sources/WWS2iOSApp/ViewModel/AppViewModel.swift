@@ -484,9 +484,10 @@ public final class AppViewModel: ObservableObject {
             )
             let targetIsInterface = state.connectedDevices.first { $0.id == targetDeviceId }?.deviceType == 1
             if DeviceRouting.isInterfaceEchoCommand(cmd), targetIsInterface {
-                guard buf.count >= 33 else { break }
-                let headerPkt = Array(buf[0..<33])
-                buf.removeFirst(33)
+                let headerPacketSize = InterfaceEchoParser.headerPacketSize
+                guard buf.count >= headerPacketSize else { break }
+                let headerPkt = Array(buf[0..<headerPacketSize])
+                buf.removeFirst(headerPacketSize)
                 interfaceEchoParser.beginCollection(headerPkt: headerPkt, parsedCmd: cmd)
                 if let echo = interfaceEchoParser.tryParseChunks(rxBuf: &buf) {
                     applyInterfaceEcho(deviceId: targetDeviceId, echo: echo)
@@ -789,6 +790,7 @@ public final class AppViewModel: ObservableObject {
 
         // Build a parser that funnels into download state.
         let parser = TrendStreamParser(
+            isInterface: state.connectedDevices.first(where: { $0.id == deviceId })?.deviceType == 1,
             onRecordsParsed: { [weak self] records in
                 Task { @MainActor in
                     guard let self else { return }
@@ -834,7 +836,7 @@ public final class AppViewModel: ObservableObject {
         // Send the trend download command so the device starts streaming.
         Task { @MainActor in
             guard let gatt = self.gattClients[deviceId] else { return }
-            let cmd = DeviceRouting.isCh2DeviceId(deviceId) ? Command.cmdDownloadCh2 : Command.cmdDownload
+            let cmd = DeviceRouting.downloadCommand(for: deviceId)
             let frame = FrameCodec.buildHeartbeat(pageIndex: Int(cmd))
             _ = await gatt.write(data: frame, withoutResponse: true)
         }

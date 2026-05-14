@@ -125,6 +125,17 @@ final class FrameCodecTests: XCTestCase {
         XCTAssertEqual(end[2],   0x51)   // CMD_OTA_END = 0x0051
     }
 
+    func testOtaStartFrameEncodesRoundedKilobytes() {
+        let frame = FrameCodec.makeStartFrame(fileSizeBytes: 4097)
+
+        XCTAssertEqual(frame[0], 0x02)
+        XCTAssertEqual(frame[1], 0x00)
+        XCTAssertEqual(frame[2], 0x50)
+        XCTAssertEqual(frame[3], 0x00)
+        XCTAssertEqual(frame[4], 0x05)
+        XCTAssertNotNil(FrameCodec.parseFrame(frame))
+    }
+
     func testFwVersionDescription() {
         XCTAssertEqual(String(describing: FwVersion(major: 1, minor: 2, patch: 3)), "v1.2.3")
     }

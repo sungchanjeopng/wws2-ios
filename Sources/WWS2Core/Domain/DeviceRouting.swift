@@ -187,6 +187,10 @@ public enum DeviceRouting {
         }
     }
 
+    public static func downloadCommand(for deviceId: String) -> UInt16 {
+        isCh2DeviceId(deviceId) ? Command.cmdDownloadCh2 : Command.cmdDownload
+    }
+
     public static func logicalDeviceId(
         physicalId: String,
         cmd: UInt16,

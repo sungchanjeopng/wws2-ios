@@ -58,7 +58,7 @@ public enum FrameParser {
     /// Expected data size for a given command. Returns -1 if variable / unknown.
     public static func expectedDataSize(cmd: UInt16, isInterface: Bool) -> Int {
         switch cmd {
-        case 0x0000, 0x0010: return isInterface ? 26 : 34
+        case 0x0000, 0x0010: return isInterface ? 200 : 34
         case 0x0001:         return isInterface ? -1 : 224
         case 0x0003:         return 30
         case 0x0004, 0x0014: return isInterface ? 22 : 16
@@ -99,6 +99,8 @@ public enum FrameParser {
         case 4:  return parseStatus4B(data)
         case 34: return parseDensityStatus34B(data)
         case 26: return parseInterfaceStatus26B(data)
+        case 200 where isInterface:
+            return parseInterfaceStatus26B(Array(data.prefix(26)))
         default: return nil
         }
     }

@@ -21,8 +21,12 @@ final class TrendStreamParserTests: XCTestCase {
 
     private func buildTrendStream(records: [[UInt8]]) -> [UInt8] {
         // header: [SOF][CMD_HI=0x00][CMD_LO=0x02][totalH][totalL][CRC_L][CRC_H]
+        buildTrendStream(cmd: 0x0002, records: records)
+    }
+
+    private func buildTrendStream(cmd: UInt16, records: [[UInt8]]) -> [UInt8] {
         let total = UInt16(records.count)
-        let hdr5: [UInt8] = [0x02, 0x00, 0x02] + u16(total)
+        let hdr5: [UInt8] = [0x02, UInt8((cmd >> 8) & 0xFF), UInt8(cmd & 0xFF)] + u16(total)
         let hdrCrc = Crc.crc16Modbus(hdr5)
         var stream: [UInt8] = hdr5 + [UInt8(hdrCrc & 0xFF), UInt8((hdrCrc >> 8) & 0xFF)]
 
@@ -46,12 +50,34 @@ final class TrendStreamParserTests: XCTestCase {
 
     private func makeParser(_ bag: CallbackBag, retryHandled: Bool = false) -> TrendStreamParser {
         return TrendStreamParser(
+            isInterface: false,
             onRecordsParsed: { bag.collected.append(contentsOf: $0) },
             onHeaderParsed:  { bag.totalRecords = $0 },
             onComplete:      { bag.completeCalled = true },
             onCrcFail:       { reason in bag.crcFailReasons.append(reason); return retryHandled },
             onError:         { msg in bag.errorMsgs.append(msg) }
         )
+    }
+
+    private func makeInterfaceParser(_ bag: CallbackBag, retryHandled: Bool = false) -> TrendStreamParser {
+        return TrendStreamParser(
+            isInterface: true,
+            onRecordsParsed: { bag.collected.append(contentsOf: $0) },
+            onHeaderParsed:  { bag.totalRecords = $0 },
+            onComplete:      { bag.completeCalled = true },
+            onCrcFail:       { reason in bag.crcFailReasons.append(reason); return retryHandled },
+            onError:         { msg in bag.errorMsgs.append(msg) }
+        )
+    }
+
+    private func sampleInterfaceRecord() -> [UInt8] {
+        [
+            24, 3, 15, 14, 25,
+            0x00, 0x64,   // ch1Light = 1.00
+            0x00, 0xC8,   // ch1Heavy = 2.00
+            0x01, 0x2C,   // ch2Light = 3.00
+            0x01, 0x90    // ch2Heavy = 4.00
+        ]
     }
 
     func testParsesFullStreamSingleCall() {
@@ -153,5 +179,24 @@ final class TrendStreamParserTests: XCTestCase {
         parser.reset()
         XCTAssertFalse(parser.isActive)
         XCTAssertTrue(parser.firstVisit)
+    }
+
+    func testParsesInterfaceDownloadHeaderAndRecordsFor0017() {
+        var stream = buildTrendStream(cmd: 0x0017, records: [sampleInterfaceRecord()])
+        let bag = CallbackBag()
+        let parser = makeInterfaceParser(bag)
+        parser.startStream()
+
+        parser.tryParse(rxBuf: &stream, downloadedCount: 0)
+
+        XCTAssertEqual(bag.totalRecords, 1)
+        XCTAssertEqual(bag.collected.count, 1)
+        guard let record = bag.collected.first else {
+            return XCTFail("expected one parsed interface trend record")
+        }
+        XCTAssertEqual(record.dst, 1.0, accuracy: 1e-9)
+        XCTAssertEqual(record.eeaD, 200)
+        XCTAssertTrue(bag.completeCalled)
+        XCTAssertTrue(stream.isEmpty)
     }
 }
