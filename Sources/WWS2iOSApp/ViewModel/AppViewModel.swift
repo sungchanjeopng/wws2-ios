@@ -405,7 +405,13 @@ public final class AppViewModel: ObservableObject {
         if let parser = trendParser, parser.isActive {
             return true
         }
-        return state.dataFilesStage == .downloading
+        // Data Files uses CMD 0x0007 / 0x0017 only as an explicit download-start
+        // request. Do not send it as a 1 Hz page heartbeat while the user is just
+        // looking at the Data Files list, viewing a saved CSV, or after completion.
+        if state.tabIndex == 4 && state.subPage == "download" {
+            return true
+        }
+        return false
     }
 
     private func ensureHeartbeatRunning() {
