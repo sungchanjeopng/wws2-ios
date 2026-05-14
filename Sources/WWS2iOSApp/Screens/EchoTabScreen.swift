@@ -45,15 +45,22 @@ public struct EchoTabScreen: View {
                 currentMode: vm.state.echoMode,
                 onModeChange: { vm.setEchoMode($0) }
             )
-            HStack {
-                Text("Thr.Light  \(ifReading.map { "\($0.thrLightSet)%" } ?? "--")")
-                    .font(.system(size: 16, weight: .bold))
+            HStack(spacing: 0) {
+                Text("Thr.Light : \(ifReading.map { "\($0.thrLightSet)%" } ?? "--")")
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(AppColors.grayLabel)
-                Spacer()
-                Text("Thr.Heavy  \(ifReading.map { "\($0.thrHeavySet)%" } ?? "--")")
-                    .font(.system(size: 16, weight: .bold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Thr.Heavy : \(ifReading.map { "\($0.thrHeavySet)%" } ?? "--")")
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(echoOrange)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Text("Echo Amp : \(ifReading.map { "\($0.echoAmp)" } ?? "--")")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(AppColors.primary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .padding(.horizontal, 4)
 
             InterfaceEchoChart(echo: ifReading)
