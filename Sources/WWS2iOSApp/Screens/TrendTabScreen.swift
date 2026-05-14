@@ -161,7 +161,7 @@ private struct InterfaceStatCard: View {
                 StatCell(label: "Heavy Level (Avg)", value: heavyStats.avg, color: trendOrange)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity)
         .background(AppColors.white)
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -176,16 +176,16 @@ private struct StatCell: View {
     var body: some View {
         VStack(spacing: 4) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(AppColors.grayLabel)
                 .multilineTextAlignment(.center)
             Text(value)
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(size: 16, weight: .bold))
                 .kerning(-0.5)
                 .foregroundStyle(color)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 2)
     }
 }

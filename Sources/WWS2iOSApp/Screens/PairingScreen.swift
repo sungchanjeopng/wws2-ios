@@ -30,10 +30,10 @@ public struct PairingScreen: View {
                 if vm.state.connectedDevices.count >= 4 {
                     HStack(spacing: 8) {
                         Image(systemName: "info.circle")
-                            .font(.system(size: 14))
+                            .font(.system(size: 12))
                             .foregroundStyle(AppColors.primary)
                         Text("4 devices connected. Scanning continues for nearby devices.")
-                            .font(.system(size: 13))
+                            .font(.system(size: 11))
                             .foregroundStyle(AppColors.grayLabel)
                     }
                     .padding(.horizontal, 14)
@@ -47,13 +47,13 @@ public struct PairingScreen: View {
 
                 if scanner.isScanning {
                     Text("Scanning continues while this page is open.")
-                        .font(.system(size: 13))
+                        .font(.system(size: 11))
                         .foregroundStyle(AppColors.grayLabel)
                         .frame(maxWidth: .infinity)
                 } else {
                     Button(action: { vm.startScan() }) {
                         Text("Scan Devices")
-                            .font(.system(size: 22, weight: .bold))
+                            .font(.system(size: 18, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
@@ -194,29 +194,29 @@ private struct ScanPanel: View {
                         .tint(AppColors.primary)
                 }
                 Image(systemName: "wave.3.right")
-                    .font(.system(size: 22))
+                    .font(.system(size: 18))
                     .foregroundStyle(AppColors.primary)
             }
             Text(isScanning ? "Scanning nearby devices" : "Pair BLE devices")
-                .font(.system(size: 22, weight: .bold))
+                .font(.system(size: 18, weight: .bold))
                 .foregroundStyle(AppColors.darkText)
             Text(isScanning
                  ? "Tap a device card to connect after PIN entry."
                  : "Use Scan Devices to find nearby BLE devices.")
-                .font(.system(size: 16))
+                .font(.system(size: 13))
                 .foregroundStyle(AppColors.grayLabel)
                 .multilineTextAlignment(.center)
 
             HStack(spacing: 8) {
                 Text(isScanning ? "Scanning..." : "Ready to scan")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(isScanning ? AppColors.primary : AppColors.grayLabel)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(isScanning ? AppColors.primary.opacity(0.1) : AppColors.background)
                     .clipShape(Capsule())
                 Text("\(connectedCount)/4 Connected")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(AppColors.grayLabel)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -238,7 +238,7 @@ private struct DeviceGroupSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.system(size: 18, weight: .heavy))
+                .font(.system(size: 15, weight: .heavy))
                 .foregroundStyle(AppColors.darkText)
                 .padding(.bottom, 4)
                 .padding(.leading, 2)
@@ -262,18 +262,18 @@ private struct DeviceSubSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(label)
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(AppColors.grayLabel)
                 Spacer()
                 Text("\(count) \(countSuffix)")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(AppColors.weakText)
             }
             .padding(.horizontal, 2)
 
             if count == 0 {
                 Text(emptyText)
-                    .font(.system(size: 13))
+                    .font(.system(size: 11))
                     .foregroundStyle(AppColors.grayLabel)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)

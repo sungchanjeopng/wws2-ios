@@ -47,11 +47,11 @@ public struct StatRow: View {
             ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
                 VStack(spacing: 6) {
                     Text(item.label)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .kerning(-0.2)
                         .foregroundStyle(AppColors.grayLabel)
                     Text(item.value)
-                        .font(.system(size: 24, weight: .bold))
+                        .font(.system(size: 19, weight: .bold))
                         .kerning(-0.8)
                         .foregroundStyle(item.color)
                 }
@@ -101,12 +101,12 @@ public struct DeviceCard: View {
                         .fill(isConnected ? AppColors.success.opacity(0.08) : AppColors.background)
                         .frame(width: 36, height: 36)
                     Image(systemName: "wave.3.right")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(isConnected ? AppColors.success : AppColors.grayLabel)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(name)
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(AppColors.darkText)
                         .lineLimit(1)
                     SignalBars(level: signalLevel)
@@ -120,7 +120,7 @@ public struct DeviceCard: View {
                     let badgeBg = isConnected ? AppColors.success.opacity(0.1) : AppColors.background
                     let badgeFg = isConnected ? AppColors.success : AppColors.grayLabel
                     Text(badgeText)
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(badgeFg)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
@@ -129,7 +129,7 @@ public struct DeviceCard: View {
                     if isConnected, let onX = onDisconnectTap {
                         Button(action: onX) {
                             Image(systemName: "xmark")
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.system(size: 10, weight: .bold))
                                 .foregroundStyle(AppColors.grayLabel)
                                 .frame(width: 26, height: 26)
                                 .background(AppColors.background)
