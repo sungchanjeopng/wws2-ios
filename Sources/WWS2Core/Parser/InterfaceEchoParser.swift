@@ -112,7 +112,12 @@ public final class InterfaceEchoParser {
 
     public func reset() {
         state = 0
-        wave.removeAll(keepingCapacity: false)
+        cmd = 0
         headerData = []
+        echoN = 0
+        fullChunks = 0
+        chunksDone = 0
+        wave.removeAll(keepingCapacity: false)
+        runningCrc = 0xFFFF
     }
 }

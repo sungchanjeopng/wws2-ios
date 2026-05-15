@@ -119,12 +119,36 @@ final class InterfaceEchoParserTests: XCTestCase {
         XCTAssertFalse(parser.isCollecting)
     }
 
-    func testReset() {
+    func testResetClearsStateAndCommand() {
+        let cap = buildCapture(emptyVal: 10, samples: [UInt16](repeating: 0x1111, count: 11))
         let parser = InterfaceEchoParser()
-        let headerPkt = [UInt8](repeating: 0, count: 203)
-        parser.beginCollection(headerPkt: headerPkt, parsedCmd: 0x0001)
+        parser.beginCollection(headerPkt: cap.headerPkt, parsedCmd: 0x0015)
+
         parser.reset()
+
         XCTAssertFalse(parser.isCollecting)
+        XCTAssertEqual(parser.cmd, 0)
         XCTAssertEqual(parser.headerData, [])
+    }
+
+    func testResetAllowsFreshCollectionAfterPartialCapture() throws {
+        let first = buildCapture(emptyVal: 200, samples: [UInt16](repeating: 0xAAAA, count: 220))
+        let secondSamples: [UInt16] = (0..<11).map { UInt16(0x0100 + $0) }
+        let second = buildCapture(emptyVal: 10, samples: secondSamples)
+        let parser = InterfaceEchoParser()
+
+        parser.beginCollection(headerPkt: first.headerPkt, parsedCmd: 0x0001)
+        var partial = Array(first.waveStream.prefix(100))
+        XCTAssertNil(parser.tryParseChunks(rxBuf: &partial))
+        XCTAssertTrue(parser.isCollecting)
+
+        parser.reset()
+        parser.beginCollection(headerPkt: second.headerPkt, parsedCmd: 0x0005)
+
+        var buf = second.waveStream
+        let result = try XCTUnwrap(parser.tryParseChunks(rxBuf: &buf))
+        XCTAssertEqual(result.wave, secondSamples.map(Int.init))
+        XCTAssertEqual(parser.cmd, 0x0005)
+        XCTAssertFalse(parser.isCollecting)
     }
 }

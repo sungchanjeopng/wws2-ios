@@ -131,11 +131,11 @@ private struct InterfaceCardContent: View {
     let reading: DeviceReading?
     var body: some View {
         let lightText: String = {
-            if let r = reading { return String(format: "%.2f", r.level * 0.01) }
+            if let r = reading { return String(format: "%.2f", r.level) }
             return "--"
         }()
         let heavyText: String = {
-            if let r = reading, let h = r.heavyLevel { return String(format: "%.2f", h * 0.01) }
+            if let r = reading, let h = r.heavyLevel { return String(format: "%.2f", h) }
             return "--"
         }()
         VStack(spacing: 16) {

@@ -137,6 +137,8 @@ public final class AppViewModel: ObservableObject {
     private var pendingOtaStartAckContinuation: CheckedContinuation<Bool, Never>?
     private var pendingOtaStartAckTimeoutTask: Task<Void, Never>?
     private var pendingOtaStartAckGeneration: UInt64?
+    private var interfaceEchoCollectionStartedAt: Date? = nil
+    private let interfaceEchoCollectionTimeout: TimeInterval = 2.0
 
     /// Pending pairing attempt — set when the user taps a scanned device,
     /// consumed when the PIN screen completes.
@@ -172,9 +174,8 @@ public final class AppViewModel: ObservableObject {
 
     public func setTab(_ index: Int) {
         if state.isTrendStreaming || state.isUploading { return }
-        if state.tabIndex == 4 && state.subPage == "pairing" {
-            scanner.stopScan()
-        }
+        stopScanIfPairingActive()
+        resetInterfaceEchoStreamState(clearAllBuffers: true)
         if index != 2 {
             trendParser?.reset()
             trendParser = nil
@@ -185,14 +186,36 @@ public final class AppViewModel: ObservableObject {
         if index == 2 { state.trendError = nil }
     }
 
-    public func openPairing()  { state.tabIndex = 4; state.subPage = "pairing" }
-    public func openCalib()    { state.tabIndex = 4; state.subPage = "calib" }
-    public func openUpload()   { state.tabIndex = 4; state.subPage = "upload" }
-    public func openDownload() { state.tabIndex = 4; state.subPage = "download" }
+    public func openPairing()  {
+        stopScanIfPairingActive()
+        resetInterfaceEchoStreamState(clearAllBuffers: true)
+        state.tabIndex = 4
+        state.subPage = "pairing"
+    }
+    public func openCalib()    {
+        stopScanIfPairingActive()
+        resetInterfaceEchoStreamState(clearAllBuffers: true)
+        state.tabIndex = 4
+        state.subPage = "calib"
+    }
+    public func openUpload()   {
+        stopScanIfPairingActive()
+        resetInterfaceEchoStreamState(clearAllBuffers: true)
+        state.tabIndex = 4
+        state.subPage = "upload"
+    }
+    public func openDownload() {
+        stopScanIfPairingActive()
+        resetInterfaceEchoStreamState(clearAllBuffers: true)
+        state.tabIndex = 4
+        state.subPage = "download"
+    }
 
     /// Aliases used by the menu screen — keep call sites identical to the
     /// Kotlin original until we converge on a single navigation API.
     public func openDataFilesList() {
+        stopScanIfPairingActive()
+        resetInterfaceEchoStreamState(clearAllBuffers: true)
         state.tabIndex = 4
         state.subPage = "download"
         state.dataFilesStage = .list
@@ -201,6 +224,8 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func openFirmwareFlow() {
+        stopScanIfPairingActive()
+        resetInterfaceEchoStreamState(clearAllBuffers: true)
         state.tabIndex = 4
         state.subPage = "upload"
         if state.isUploading { return }
@@ -213,6 +238,7 @@ public final class AppViewModel: ObservableObject {
     ///   PIN entry flow (consumed by `onPairingPinResult`).
     public func requestConnectDevice(_ deviceId: String) {
         if let connected = state.connectedDevices.first(where: { $0.id == deviceId }) {
+            resetInterfaceEchoStreamState(clearAllBuffers: true)
             state.activeDeviceId = deviceId
             state.activeDeviceLabel = connected.label
             state.deviceType = connected.deviceType == 1 ? .interface_ : .density
@@ -414,6 +440,36 @@ public final class AppViewModel: ObservableObject {
         return false
     }
 
+    private func stopScanIfPairingActive() {
+        if state.tabIndex == 4 && state.subPage == "pairing" {
+            scanner.stopScan()
+        }
+    }
+
+    private func clearRxBuffers(deviceId: String? = nil, clearAll: Bool = false) {
+        if clearAll {
+            for key in Array(rxBuffers.keys) {
+                rxBuffers[key]?.removeAll(keepingCapacity: true)
+            }
+            return
+        }
+
+        guard let deviceId else { return }
+        let physicalId = DeviceRouting.physicalDeviceId(for: deviceId)
+        let relatedIds = state.connectedDevices
+            .map(\.id)
+            .filter { $0 == physicalId || DeviceRouting.physicalDeviceId(for: $0) == physicalId }
+        for id in Set(relatedIds + [deviceId, physicalId]) {
+            rxBuffers[id]?.removeAll(keepingCapacity: true)
+        }
+    }
+
+    private func resetInterfaceEchoStreamState(deviceId: String? = nil, clearAllBuffers: Bool = false) {
+        interfaceEchoParser.reset()
+        interfaceEchoCollectionStartedAt = nil
+        clearRxBuffers(deviceId: deviceId, clearAll: clearAllBuffers)
+    }
+
     private func ensureHeartbeatRunning() {
         if heartbeatTask != nil { return }
         heartbeatTask = Task { @MainActor [weak self] in
@@ -453,16 +509,25 @@ public final class AppViewModel: ObservableObject {
         }
 
         if interfaceEchoParser.isCollecting {
-            if let echo = interfaceEchoParser.tryParseChunks(rxBuf: &buf) {
-                let targetId = DeviceRouting.logicalDeviceId(
-                    physicalId: deviceId,
-                    cmd: interfaceEchoParser.cmd,
-                    connectedDeviceIds: Set(state.connectedDevices.map(\.id))
-                )
-                applyInterfaceEcho(deviceId: targetId, echo: echo)
+            if let startedAt = interfaceEchoCollectionStartedAt,
+               Date().timeIntervalSince(startedAt) > interfaceEchoCollectionTimeout {
+                // A lost/misaligned echo chunk can leave the stateful parser waiting forever.
+                // Reset stale collection so the next 1 Hz echo heartbeat can start a fresh header.
+                resetInterfaceEchoStreamState(deviceId: deviceId)
+                buf.removeAll(keepingCapacity: true)
+            } else {
+                if let echo = interfaceEchoParser.tryParseChunks(rxBuf: &buf) {
+                    let targetId = DeviceRouting.logicalDeviceId(
+                        physicalId: deviceId,
+                        cmd: interfaceEchoParser.cmd,
+                        connectedDeviceIds: Set(state.connectedDevices.map(\.id))
+                    )
+                    applyInterfaceEcho(deviceId: targetId, echo: echo)
+                }
+                rxBuffers[deviceId] = buf
+                if interfaceEchoParser.isCollecting { return }
+                interfaceEchoCollectionStartedAt = nil
             }
-            rxBuffers[deviceId] = buf
-            if interfaceEchoParser.isCollecting { return }
         }
 
         // Greedy frame extraction: walk the buffer looking for a SOF, then
@@ -495,10 +560,15 @@ public final class AppViewModel: ObservableObject {
                 let headerPkt = Array(buf[0..<headerPacketSize])
                 buf.removeFirst(headerPacketSize)
                 interfaceEchoParser.beginCollection(headerPkt: headerPkt, parsedCmd: cmd)
+                interfaceEchoCollectionStartedAt = Date()
                 if let echo = interfaceEchoParser.tryParseChunks(rxBuf: &buf) {
                     applyInterfaceEcho(deviceId: targetDeviceId, echo: echo)
+                    interfaceEchoCollectionStartedAt = nil
                     consumedAll = false
                     continue
+                }
+                if !interfaceEchoParser.isCollecting {
+                    interfaceEchoCollectionStartedAt = nil
                 }
                 consumedAll = false
                 break
@@ -676,7 +746,7 @@ public final class AppViewModel: ObservableObject {
             pendingPairingContinuations.removeValue(forKey: id)?.resume(returning: nil)
         }
         rxBuffers[physicalId] = nil
-        interfaceEchoParser.reset()
+        resetInterfaceEchoStreamState(deviceId: physicalId)
 
         state.connectedDevices.removeAll { idsToRemove.contains($0.id) }
         state.visibleDeviceIds.subtract(idsToRemove)
@@ -775,7 +845,15 @@ public final class AppViewModel: ObservableObject {
 
     // MARK: Echo
 
-    public func setEchoMode(_ mode: EchoMode) { state.echoMode = mode }
+    public func setEchoMode(_ mode: EchoMode) {
+        guard state.echoMode != mode else { return }
+        if state.deviceType == .interface_ {
+            resetInterfaceEchoStreamState(deviceId: state.activeDeviceId)
+            state.interfaceEchoReading = nil
+            state.echoReading = nil
+        }
+        state.echoMode = mode
+    }
 
     // MARK: Data download
 
