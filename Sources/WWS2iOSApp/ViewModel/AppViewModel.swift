@@ -137,8 +137,11 @@ public final class AppViewModel: ObservableObject {
     private var pendingOtaStartAckContinuation: CheckedContinuation<Bool, Never>?
     private var pendingOtaStartAckTimeoutTask: Task<Void, Never>?
     private var pendingOtaStartAckGeneration: UInt64?
-    private var interfaceEchoCollectionStartedAt: Date? = nil
-    private let interfaceEchoCollectionTimeout: TimeInterval = 2.0
+    private var interfaceEchoCollectionDeviceId: String? = nil
+    private var interfaceEchoCollectionLastProgressAt: Date? = nil
+    // Keep this longer than one heartbeat period. On iOS, CoreBluetooth can deliver
+    // the 203B header + waveform burst over several callbacks while SwiftUI is drawing.
+    private let interfaceEchoCollectionTimeout: TimeInterval = 5.0
 
     /// Pending pairing attempt — set when the user taps a scanned device,
     /// consumed when the PIN screen completes.
@@ -466,7 +469,8 @@ public final class AppViewModel: ObservableObject {
 
     private func resetInterfaceEchoStreamState(deviceId: String? = nil, clearAllBuffers: Bool = false) {
         interfaceEchoParser.reset()
-        interfaceEchoCollectionStartedAt = nil
+        interfaceEchoCollectionDeviceId = nil
+        interfaceEchoCollectionLastProgressAt = nil
         clearRxBuffers(deviceId: deviceId, clearAll: clearAllBuffers)
     }
 
@@ -497,6 +501,10 @@ public final class AppViewModel: ObservableObject {
         // Per-device rxBuf
         var buf = rxBuffers[deviceId, default: []]
         buf.append(contentsOf: bytes)
+        let maxBufferedBytes = (trendParser?.isActive == true) ? 120_000 : 8_000
+        if buf.count > maxBufferedBytes {
+            buf.removeFirst(buf.count - maxBufferedBytes / 2)
+        }
         state.rxBlink.toggle()
 
         // If a trend download is in progress, the parser owns the byte
@@ -509,13 +517,22 @@ public final class AppViewModel: ObservableObject {
         }
 
         if interfaceEchoParser.isCollecting {
-            if let startedAt = interfaceEchoCollectionStartedAt,
-               Date().timeIntervalSince(startedAt) > interfaceEchoCollectionTimeout {
-                // A lost/misaligned echo chunk can leave the stateful parser waiting forever.
-                // Reset stale collection so the next 1 Hz echo heartbeat can start a fresh header.
+            guard interfaceEchoCollectionDeviceId == nil || interfaceEchoCollectionDeviceId == deviceId else {
+                // Android only drains notifications for the currently active link
+                // during interface-echo collection. Buffer other devices, but do
+                // not let them corrupt the shared waveform parser mid-capture.
+                rxBuffers[deviceId] = buf
+                return
+            }
+
+            if let lastProgressAt = interfaceEchoCollectionLastProgressAt,
+               Date().timeIntervalSince(lastProgressAt) > interfaceEchoCollectionTimeout {
+                // Timeout on idle progress, not on total collection age. A valid
+                // waveform can span many callbacks while still moving forward.
                 resetInterfaceEchoStreamState(deviceId: deviceId)
                 buf.removeAll(keepingCapacity: true)
             } else {
+                let initialCount = buf.count
                 if let echo = interfaceEchoParser.tryParseChunks(rxBuf: &buf) {
                     let targetId = DeviceRouting.logicalDeviceId(
                         physicalId: deviceId,
@@ -524,9 +541,13 @@ public final class AppViewModel: ObservableObject {
                     )
                     applyInterfaceEcho(deviceId: targetId, echo: echo)
                 }
+                if buf.count != initialCount || !interfaceEchoParser.isCollecting {
+                    interfaceEchoCollectionLastProgressAt = Date()
+                }
                 rxBuffers[deviceId] = buf
                 if interfaceEchoParser.isCollecting { return }
-                interfaceEchoCollectionStartedAt = nil
+                interfaceEchoCollectionDeviceId = nil
+                interfaceEchoCollectionLastProgressAt = nil
             }
         }
 
@@ -560,15 +581,22 @@ public final class AppViewModel: ObservableObject {
                 let headerPkt = Array(buf[0..<headerPacketSize])
                 buf.removeFirst(headerPacketSize)
                 interfaceEchoParser.beginCollection(headerPkt: headerPkt, parsedCmd: cmd)
-                interfaceEchoCollectionStartedAt = Date()
+                interfaceEchoCollectionDeviceId = deviceId
+                interfaceEchoCollectionLastProgressAt = Date()
+                let initialCount = buf.count
                 if let echo = interfaceEchoParser.tryParseChunks(rxBuf: &buf) {
                     applyInterfaceEcho(deviceId: targetDeviceId, echo: echo)
-                    interfaceEchoCollectionStartedAt = nil
+                    interfaceEchoCollectionDeviceId = nil
+                    interfaceEchoCollectionLastProgressAt = nil
                     consumedAll = false
                     continue
                 }
+                if buf.count != initialCount {
+                    interfaceEchoCollectionLastProgressAt = Date()
+                }
                 if !interfaceEchoParser.isCollecting {
-                    interfaceEchoCollectionStartedAt = nil
+                    interfaceEchoCollectionDeviceId = nil
+                    interfaceEchoCollectionLastProgressAt = nil
                 }
                 consumedAll = false
                 break
@@ -588,7 +616,19 @@ public final class AppViewModel: ObservableObject {
                     break
                 }
             }
-            if !matched { break } // wait for more bytes
+            if !matched {
+                // Android reference does not wait forever on a CRC-invalid SOF.
+                // If we have already scanned beyond the largest normal frame size
+                // (status/diag/density echo are all < 256B; interface echo header is
+                // handled above), the leading SOF is stale waveform/noise. Drop one
+                // byte and continue searching so a later real 203B echo header can recover.
+                if buf.count >= 256 {
+                    buf.removeFirst()
+                    consumedAll = false
+                    continue
+                }
+                break // wait for more bytes
+            }
         }
 
         rxBuffers[deviceId] = buf
