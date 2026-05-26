@@ -82,7 +82,8 @@ final class FrameParserTests: XCTestCase {
 
         let r = FrameParser.parse(cmd: 0x0010, data: bytes, isInterface: true)
         guard case .interfaceStatus(let reading, _, _, _, _, _, let freqMHz,
-                                    let tvg, let offset, _, let relay, _) = r else {
+                                    let tvg, let offset, _, let relay,
+                                    let emptyDistance, let deadZone, _) = r else {
             return XCTFail("expected .interfaceStatus")
         }
         XCTAssertEqual(reading.level, 1.0, accuracy: 1e-9)
@@ -91,6 +92,9 @@ final class FrameParserTests: XCTestCase {
         XCTAssertEqual(tvg, 30)
         XCTAssertEqual(offset, -1.0, accuracy: 1e-9)
         XCTAssertEqual(relay, 1)
+        // 26-byte payload has no emptyDistance/deadZone bytes
+        XCTAssertNil(emptyDistance)
+        XCTAssertNil(deadZone)
     }
 
     func testParseInterfaceStatusFrom200BytePayloadUsesFirst26BytesOnly() {
@@ -116,7 +120,7 @@ final class FrameParserTests: XCTestCase {
         let result = FrameParser.parse(cmd: 0x0010, data: payload, isInterface: true)
         guard case .interfaceStatus(let reading, let temperature, let currentMA, let damping,
                                     let set4mA, let set20mA, let freqMHz, let tvg,
-                                    let offset, let asf, let relay, _) = result else {
+                                    let offset, let asf, let relay, _, _, _) = result else {
             return XCTFail("expected .interfaceStatus from 200-byte interface payload")
         }
         XCTAssertEqual(reading.level, 1.0, accuracy: 1e-9)
@@ -163,7 +167,7 @@ final class FrameParserTests: XCTestCase {
             bytes += s16(0); bytes += u16(0); bytes += u16(0); bytes += u16(0)
             bytes += u16(0); bytes += u16(0); bytes += u16(0); bytes += u16(0)
             let r = FrameParser.parse(cmd: 0x0000, data: bytes, isInterface: true)
-            guard case .interfaceStatus(_, _, _, _, _, _, let freqMHz, _, _, _, _, _) = r else {
+            guard case .interfaceStatus(_, _, _, _, _, _, let freqMHz, _, _, _, _, _, _, _) = r else {
                 return XCTFail("freqIdx=\(idx)")
             }
             XCTAssertEqual(freqMHz, expectedMHz, accuracy: 1e-9, "freqIdx=\(idx)")
