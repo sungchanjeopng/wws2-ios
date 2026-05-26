@@ -42,6 +42,8 @@ public struct MainUiState: Equatable {
     public var freqMHz: Double = 0.0
     public var tvg: Int = 0
     public var offset: Double = 0.0
+    public var emptyDistance: Double = 0.0
+    public var deadZone: Double = 0.0
     public var asf: Int = 0
     public var relay: Int = 0
     public var densUnit: Int = 0
@@ -102,6 +104,9 @@ public final class AppViewModel: ObservableObject {
     @Published public var state = MainUiState()
     @Published public var showPinForPairing: Bool = false
     @Published public var bleError: BleErrorState? = nil
+    /// Transient user-visible message (snackbar). Mirrors Kotlin
+    /// MainViewModel._snackbarMessage. Set to nil after the UI consumes it.
+    @Published public var snackbarMessage: String? = nil
 
     /// Lazily create CoreBluetooth only when the pairing flow actually needs it.
     ///
@@ -699,7 +704,7 @@ public final class AppViewModel: ObservableObject {
             state.trendRecords.append(tagged)
         case .interfaceStatus(let reading, let temperature, let currentMA, let damping,
                               let set4, let set20, let freq, let tvg, let offset, let asf,
-                              let relay, let trend):
+                              let relay, let emptyDistance, let deadZone, let trend):
             state.deviceReadings[deviceId] = reading
             state.temperatureC = temperature
             state.currentMA = currentMA
@@ -707,6 +712,11 @@ public final class AppViewModel: ObservableObject {
             state.set4mA = set4; state.set20mA = set20
             state.freqMHz = freq; state.tvg = tvg; state.offset = offset
             state.asf = asf; state.relay = relay
+            // Mirror Kotlin MainViewModel.kt:870-871 — only overwrite when
+            // the firmware actually sent the extended payload; otherwise
+            // preserve the previously-known value.
+            if let emptyDistance { state.emptyDistance = emptyDistance }
+            if let deadZone      { state.deadZone      = deadZone      }
             let tagged = TrendRecord(
                 dateTime: trend.dateTime,
                 eeaD: trend.eeaD, dst: trend.dst,
@@ -763,6 +773,37 @@ public final class AppViewModel: ObservableObject {
 
     public func cycleTemperatureUnit() {
         state.tempUnit = TemperatureUnit.fromInt(state.tempUnit).next().rawValue
+    }
+
+    /// Mirror Kotlin `appSettingCmd` (MainViewModel.kt:294-296). The active
+    /// device's `_CH2` suffix shifts the command base by +1000 so the peer
+    /// firmware routes the write to the second logical channel.
+    private func appSettingCmd(baseCmd: Int) -> Int {
+        return state.activeDeviceId.hasSuffix("_CH2") ? baseCmd + 1000 : baseCmd
+    }
+
+    /// Ported from MainViewModel.kt:298-309. Sends an app-setting write
+    /// frame (SOF=0x03) to the currently active device. Returns immediately;
+    /// the result is surfaced through `snackbarMessage`.
+    public func sendAppSetting(baseCmd: Int, value: Int) {
+        let activeId = state.activeDeviceId
+        guard !activeId.isEmpty else {
+            snackbarMessage = "No active device."
+            return
+        }
+        let physicalId = DeviceRouting.physicalDeviceId(for: activeId)
+        guard let gatt = gattClients[physicalId] else {
+            snackbarMessage = "No active device."
+            return
+        }
+        let cmd = appSettingCmd(baseCmd: baseCmd)
+        let frame = FrameCodec.buildSettingFrame(cmd: cmd, data: value)
+        Task { [weak self] in
+            let ok = await gatt.write(data: frame, withoutResponse: false)
+            await MainActor.run {
+                self?.snackbarMessage = ok ? "Setting sent." : "Setting failed."
+            }
+        }
     }
 
     public func disconnectDevice(_ deviceId: String) {

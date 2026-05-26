@@ -24,7 +24,12 @@ public enum FrameParser {
             extIn2State: Int
         )
 
-        /// Status 26B: full interface-meter reading + extras.
+        /// Status 26B (or 30B+/32B+ extended): full interface-meter reading + extras.
+        /// Extended layout (matches MainViewModel.kt:870-871):
+        ///   - bytes 28..29  → emptyDistance  (only present when data.count >= 30)
+        ///   - bytes 30..31  → deadZone       (only present when data.count >= 32)
+        /// When the firmware sends the minimal 26B payload these two values are
+        /// reported as nil so the caller can preserve the previously-known state.
         case interfaceStatus(
             reading: DeviceReading,
             temperature: Double,
@@ -37,6 +42,8 @@ public enum FrameParser {
             offset: Double,
             asf: Int,
             relay: Int,
+            emptyDistance: Double?,
+            deadZone: Double?,
             trendRecord: TrendRecord
         )
 
@@ -179,6 +186,15 @@ public enum FrameParser {
         let asf       = Int(readU16BE(data, 20))
         let relay     = Int(readU16BE(data, 22))
         let errorCode = Int(readU16BE(data, 24))
+        // bytes 26..27 are an echoAmp reservation in the firmware payload; we
+        // mirror Kotlin's behaviour and skip them, then opportunistically read
+        // emptyDistance/deadZone when the firmware sends the extended layout.
+        let emptyDistance: Double? = data.count >= 30
+            ? Double(readU16BE(data, 28)) * 0.01
+            : nil
+        let deadZone: Double? = data.count >= 32
+            ? Double(readU16BE(data, 30)) * 0.01
+            : nil
 
         let reading = DeviceReading(
             level: light, temperature: temperature, currentMA: currentMA, damping: damping,
@@ -196,6 +212,7 @@ public enum FrameParser {
             temperature: temperature, currentMA: currentMA, damping: damping,
             set4mA: set4mA, set20mA: set20mA, freqMHz: Double(freq) * 0.001,
             tvg: tvg, offset: Double(offset) * 0.01, asf: asf, relay: relay,
+            emptyDistance: emptyDistance, deadZone: deadZone,
             trendRecord: trendRecord
         )
     }

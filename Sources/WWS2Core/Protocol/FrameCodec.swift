@@ -63,6 +63,27 @@ public enum FrameCodec {
         return payload + [UInt8(crc & 0xFF), UInt8((crc >> 8) & 0xFF)]
     }
 
+    /// Build an app-setting write frame matching Android `BleProtocolService.buildSettingFrame`.
+    ///
+    /// Frame layout:
+    ///   [SOF=0x03] [CMD_HI] [CMD_LO] [DATA_HI] [DATA_LO] [CRC16_LO] [CRC16_HI]
+    ///
+    /// NOTE: This is the ONLY frame in the protocol that uses SOF = 0x03 (rather than 0x02).
+    /// The peer firmware uses this SOF to distinguish a write request from normal traffic.
+    /// `data` is encoded as 16-bit unsigned big-endian (negative values are sign-extended
+    /// then masked, matching the Kotlin `data and 0xFFFF` behaviour).
+    public static func buildSettingFrame(cmd: Int, data: Int) -> [UInt8] {
+        let settingSof: UInt8 = 0x03
+        let cmdHi = UInt8((cmd >> 8) & 0xFF)
+        let cmdLo = UInt8(cmd & 0xFF)
+        let data16 = data & 0xFFFF
+        let dataHi = UInt8((data16 >> 8) & 0xFF)
+        let dataLo = UInt8(data16 & 0xFF)
+        let payload: [UInt8] = [settingSof, cmdHi, cmdLo, dataHi, dataLo]
+        let crc = Crc.crc16Modbus(payload)
+        return payload + [UInt8(crc & 0xFF), UInt8((crc >> 8) & 0xFF)]
+    }
+
     public static func buildHeartbeat(pageIndex: Int, expectedLen: Int = 0) -> [UInt8] {
         let cmdHi = UInt8((pageIndex >> 8) & 0xFF)
         let cmdLo = UInt8(pageIndex & 0xFF)

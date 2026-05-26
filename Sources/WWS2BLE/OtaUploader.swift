@@ -61,6 +61,12 @@ public final class OtaUploader {
         }
 
         // 1) Send OTA start frame
+        //    Mirrors Android BleProtocolService.uploadFirmware (lines 543-545):
+        //      delay(50ms) → write start frame → delay(3000ms fixed).
+        //    The fixed 3 s wait gives the bootloader time to erase flash before
+        //    we start streaming payload chunks. `awaitStartAck` is still hooked
+        //    up so callers that want to observe the start ACK can; we just no
+        //    longer block the payload phase on it.
         try? await Task.sleep(nanoseconds: 50_000_000)
         if Task.isCancelled { return OtaResult.timeout.rawValue }
         let startAckTask = Task { await awaitStartAck(10.0) }
@@ -69,15 +75,18 @@ public final class OtaUploader {
             data: FrameCodec.makeStartFrame(fileSizeBytes: data.count),
             withoutResponse: true
         )
-        if !wroteStart { return OtaResult.timeout.rawValue }
-
-        let acked = await startAckTask.value
-        if Task.isCancelled { return OtaResult.timeout.rawValue }
-        if acked {
-            try? await Task.sleep(nanoseconds: 500_000_000)
-        } else {
+        if !wroteStart {
+            startAckTask.cancel()
             return OtaResult.timeout.rawValue
         }
+        // Android-equivalent fixed wait — matches BleProtocolService.kt:545
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        if Task.isCancelled {
+            startAckTask.cancel()
+            return OtaResult.timeout.rawValue
+        }
+        // Drain (or cancel) the optional ACK listener so it does not leak.
+        startAckTask.cancel()
 
         // 2) Stream payload in chunks
         var payload = min(200, gatt.payloadFromMtu())
@@ -109,7 +118,8 @@ public final class OtaUploader {
                 return OtaResult.timeout.rawValue
             }
 
-            try? await Task.sleep(nanoseconds: 20_000_000)
+            // 30 ms chunk gap — matches Android BleProtocolService.kt:558
+            try? await Task.sleep(nanoseconds: 30_000_000)
             i = end
 
             let progress = Double(i) / Double(total)
