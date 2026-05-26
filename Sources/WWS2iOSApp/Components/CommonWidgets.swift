@@ -296,12 +296,7 @@ public struct SettingsPanel: View {
         }()
 
         VStack(alignment: .leading, spacing: 0) {
-            Text("CONFIGURATION")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(AppColors.darkText)
-                .padding(.leading, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 6)
+            Spacer().frame(height: 8)
             DiagRow(label: "Damping", value: "\(damping)")
             DiagRow(label: "4mA Set (\(dUnit.unitStr))", value: dUnit.format(raw: set4mA))
             DiagRow(label: "20mA Set (\(dUnit.unitStr))", value: dUnit.format(raw: set20mA))
@@ -336,12 +331,7 @@ public struct StatusInfoPanel: View {
     public var body: some View {
         let tUnit = TemperatureUnit.fromInt(tempUnit)
         VStack(alignment: .leading, spacing: 0) {
-            Text("Status")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(AppColors.darkText)
-                .padding(.leading, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 6)
+            Spacer().frame(height: 8)
             DiagRow(label: "Current (mA)", value: String(format: "%.2f", currentMA))
             DiagRow(label: "Temp (\(tUnit.unitStr))", value: tUnit.format(celsius: temperature))
             DiagRow(label: "Relay", value: relay == 1 ? "Act" : "Stop")

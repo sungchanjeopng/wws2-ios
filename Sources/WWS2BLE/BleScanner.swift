@@ -36,6 +36,8 @@ public final class BleScanner: NSObject, ObservableObject {
 
     @Published public private(set) var scannedDevices: [String: ScannedDevice] = [:]
     @Published public private(set) var isScanning: Bool = false
+    /// 현재 CoreBluetooth 상태 — UI에서 권한/전원 안내를 띄우기 위해 노출
+    @Published public private(set) var managerState: CBManagerState = .unknown
 
     /// Set of peripheral identifiers that the higher layer is currently trying
     /// to connect to (mirrors the Kotlin `connectingIds` synchronized set).
@@ -133,11 +135,13 @@ public final class BleScanner: NSObject, ObservableObject {
 extension BleScanner: CBCentralManagerDelegate {
 
     public nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        let newState = central.state
         Task { @MainActor in
-            if central.state == .poweredOn, self.pendingStart {
+            self.managerState = newState
+            if newState == .poweredOn, self.pendingStart {
                 self.pendingStart = false
                 self.startScan()
-            } else if central.state != .poweredOn {
+            } else if newState != .poweredOn {
                 self.isScanning = false
             }
         }

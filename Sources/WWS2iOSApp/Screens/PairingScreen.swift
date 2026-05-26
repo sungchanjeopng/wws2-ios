@@ -7,16 +7,60 @@
 // call vm.startScan().
 
 import SwiftUI
+import CoreBluetooth
 import WWS2Core
 import WWS2BLE
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public struct PairingScreen: View {
     @ObservedObject var vm: AppViewModel
     @ObservedObject private var scanner: BleScanner
+    @State private var showBleDialog: Bool = false
+    @State private var bleDialogTitle: String = ""
+    @State private var bleDialogMessage: String = ""
+    @State private var bleDialogOpensSettings: Bool = false
 
     public init(vm: AppViewModel) {
         self.vm = vm
         self.scanner = vm.scanner
+    }
+
+    /// "Scan Devices" 버튼 핸들러 — Bluetooth 상태에 따라 안내 다이얼로그 표시
+    private func handleScanTap() {
+        switch scanner.managerState {
+        case .poweredOn:
+            vm.startScan()
+        case .poweredOff:
+            bleDialogTitle = "Bluetooth 꺼짐"
+            bleDialogMessage = "BLE 스캔을 위해 Bluetooth를 켜야 합니다.\n제어센터 또는 설정에서 Bluetooth를 켜 주세요."
+            bleDialogOpensSettings = true
+            showBleDialog = true
+        case .unauthorized:
+            bleDialogTitle = "Bluetooth 권한 필요"
+            bleDialogMessage = "BLE 스캔이 차단되어 있습니다.\n설정 → 앱 → Bluetooth를 허용해 주세요."
+            bleDialogOpensSettings = true
+            showBleDialog = true
+        case .unsupported:
+            bleDialogTitle = "지원되지 않음"
+            bleDialogMessage = "이 기기는 BLE를 지원하지 않습니다."
+            bleDialogOpensSettings = false
+            showBleDialog = true
+        case .resetting, .unknown:
+            // 시스템이 초기화 중 — 사용자가 곧 재시도 가능
+            vm.startScan()
+        @unknown default:
+            vm.startScan()
+        }
+    }
+
+    private func openSettings() {
+        #if canImport(UIKit)
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
+        #endif
     }
 
     public var body: some View {
@@ -51,7 +95,7 @@ public struct PairingScreen: View {
                         .foregroundStyle(AppColors.grayLabel)
                         .frame(maxWidth: .infinity)
                 } else {
-                    Button(action: { vm.startScan() }) {
+                    Button(action: { handleScanTap() }) {
                         Text("Scan Devices")
                             .font(.system(size: 18, weight: .bold))
                             .foregroundStyle(.white)
@@ -65,6 +109,16 @@ public struct PairingScreen: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+        }
+        .alert(bleDialogTitle, isPresented: $showBleDialog) {
+            if bleDialogOpensSettings {
+                Button("설정 열기") { openSettings() }
+                Button("취소", role: .cancel) { }
+            } else {
+                Button("확인", role: .cancel) { }
+            }
+        } message: {
+            Text(bleDialogMessage)
         }
     }
 

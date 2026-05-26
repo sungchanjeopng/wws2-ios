@@ -64,12 +64,7 @@ private struct InterfaceParametersPanel: View {
     let state: MainUiState
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("CONFIGURATION")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(AppColors.darkText)
-                .padding(.leading, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 6)
+            Spacer().frame(height: 8)
             DiagRow(label: "Freq",     value: "\(Int((state.freqMHz * 1000).rounded())) kHz")
             DiagRow(label: "Offset",   value: String(format: "%.2f m", state.offset))
             DiagRow(label: "4mA Set",  value: String(format: "%.2f", state.set4mA))
@@ -89,12 +84,7 @@ private struct InterfaceStatusPanel: View {
     var body: some View {
         let tUnit = TemperatureUnit.fromInt(state.tempUnit)
         VStack(alignment: .leading, spacing: 0) {
-            Text("Status")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(AppColors.darkText)
-                .padding(.leading, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 6)
+            Spacer().frame(height: 8)
             DiagRow(label: "Temperature",
                     value: "\(tUnit.format(celsius: state.temperatureC)) \(tUnit.unitStr)")
             DiagRow(label: "Current",
