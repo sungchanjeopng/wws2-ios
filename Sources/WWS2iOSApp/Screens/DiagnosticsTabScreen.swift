@@ -186,13 +186,6 @@ private struct InterfaceParametersPanel: View {
                 })
             }
 
-            EditableDiagRow(label: "TVG", value: "\(state.tvg)") {
-                onEdit(ConfigEdit(title: "TVG", cmd: 10, value: state.tvg,
-                                  min: 0, max: 7, step: 1, allowTextInput: false) { v in
-                    "\(v)"
-                })
-            }
-
             EditableDiagRow(label: "Damping", value: "\(state.damping)") {
                 onEdit(ConfigEdit(title: "Damping", cmd: 11, value: state.damping,
                                   min: 1, max: 100, step: 1) { v in "\(v)" })
