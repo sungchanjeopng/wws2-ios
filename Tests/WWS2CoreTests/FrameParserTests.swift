@@ -97,7 +97,13 @@ final class FrameParserTests: XCTestCase {
         XCTAssertNil(deadZone)
     }
 
-    func testParseInterfaceStatusFrom200BytePayloadUsesFirst26BytesOnly() {
+    func testParseInterfaceStatusFrom200BytePayloadReadsEmptyAndDeadZone() {
+        // Firmware (data_commu.c:758-794) sends a 200-byte interface status:
+        //   bytes  0..25  standard interface status
+        //   bytes 26..27  echoAmp        (reserved, parser ignores)
+        //   bytes 28..29  emptyDistance  (meters × 100)
+        //   bytes 30..31  deadZone       (meters × 100)
+        //   bytes 32..199 reserved 0x00
         var semanticBytes: [UInt8] = []
         semanticBytes += u16(100)    // ch1Light → 1.00
         semanticBytes += u16(250)    // ch1Heavy → 2.50
@@ -114,13 +120,18 @@ final class FrameParserTests: XCTestCase {
         semanticBytes += u16(3)      // errorCode
         XCTAssertEqual(semanticBytes.count, 26)
 
-        let payload = semanticBytes + Array(repeating: 0xAB, count: 174)
+        var payload = semanticBytes
+        payload += u16(777)          // bytes 26..27 echoAmp (ignored)
+        payload += u16(150)          // bytes 28..29 emptyDistance → 1.50
+        payload += u16(30)           // bytes 30..31 deadZone → 0.30
+        payload += Array(repeating: 0x00, count: 168) // bytes 32..199 reserved
         XCTAssertEqual(payload.count, 200)
 
         let result = FrameParser.parse(cmd: 0x0010, data: payload, isInterface: true)
         guard case .interfaceStatus(let reading, let temperature, let currentMA, let damping,
                                     let set4mA, let set20mA, let freqMHz, let tvg,
-                                    let offset, let asf, let relay, _, _, _) = result else {
+                                    let offset, let asf, let relay,
+                                    let emptyDistance, let deadZone, _) = result else {
             return XCTFail("expected .interfaceStatus from 200-byte interface payload")
         }
         XCTAssertEqual(reading.level, 1.0, accuracy: 1e-9)
@@ -135,6 +146,9 @@ final class FrameParserTests: XCTestCase {
         XCTAssertEqual(offset, 0.25, accuracy: 1e-9)
         XCTAssertEqual(asf, 9)
         XCTAssertEqual(relay, 1)
+        // The empty/dead-zone bytes at offset 28..31 must now be parsed, not dropped.
+        XCTAssertEqual(emptyDistance ?? -1.0, 1.50, accuracy: 1e-9)
+        XCTAssertEqual(deadZone ?? -1.0, 0.30, accuracy: 1e-9)
     }
 
     func testParseDensityDiag() {

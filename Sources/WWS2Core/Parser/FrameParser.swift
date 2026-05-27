@@ -105,9 +105,16 @@ public enum FrameParser {
         switch data.count {
         case 4:  return parseStatus4B(data)
         case 34: return parseDensityStatus34B(data)
-        case 26: return parseInterfaceStatus26B(data)
+        // Interface status: minimal 26B, the extended 28/30/32B layouts that append
+        // echoAmp (26..27) / emptyDistance (28..29) / deadZone (30..31), or the full
+        // 200B payload the firmware actually sends (bytes 32..199 are reserved 0x00).
+        // Pass the FULL data — never truncate — so parseInterfaceStatus26B can read
+        // emptyDistance/deadZone when present. Mirrors Kotlin MainViewModel.kt:852-871
+        // and firmware data_commu.c:787-794 ("append at reserved offset 28~31").
+        case 26, 28, 30, 32:
+            return parseInterfaceStatus26B(data)
         case 200 where isInterface:
-            return parseInterfaceStatus26B(Array(data.prefix(26)))
+            return parseInterfaceStatus26B(data)
         default: return nil
         }
     }
