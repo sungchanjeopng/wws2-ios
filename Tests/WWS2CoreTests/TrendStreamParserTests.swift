@@ -194,7 +194,8 @@ final class TrendStreamParserTests: XCTestCase {
         guard let record = bag.collected.first else {
             return XCTFail("expected one parsed interface trend record")
         }
-        XCTAssertEqual(record.dst, 1.0, accuracy: 1e-9)
+        // dst stores raw uint16 (cm); ch1Light=1.00 m → 100
+        XCTAssertEqual(record.dst, 100.0, accuracy: 1e-9)
         XCTAssertEqual(record.eeaD, 200)
         XCTAssertTrue(bag.completeCalled)
         XCTAssertTrue(stream.isEmpty)

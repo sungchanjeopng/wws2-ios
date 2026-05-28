@@ -154,10 +154,11 @@ public final class TrendStreamParser {
     private func parseRecord(_ recBytes: [UInt8]) -> TrendRecord? {
         if isInterface {
             guard let record = InterfaceTrendRecord.fromBytes(recBytes) else { return nil }
+            // TrendRecord.dst/eeaD store raw uint16 (cm); chart/stats apply *0.01.
             return TrendRecord(
                 dateTime: record.dateTime,
                 eeaD: Int(record.ch1Heavy * 100.0),
-                dst: record.ch1Light,
+                dst: record.ch1Light * 100.0,
                 temperature: 0.0
             )
         }

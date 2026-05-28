@@ -55,10 +55,11 @@ public final class ExportCsvUseCase {
             sb.append("Time,Light,Heavy,Temp\n")
             for r in records {
                 let dt = formatDateTime(r.dateTime)
+                // Interface dst is raw uint16 (cm); convert to meters for CSV.
                 let line = String(
                     format: "%@,%.2f,%.2f,%.1f\n",
                     dt,
-                    r.dst,
+                    r.dst * 0.01,
                     Double(r.eeaD) * 0.01,
                     r.temperature
                 )
