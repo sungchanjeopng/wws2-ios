@@ -130,6 +130,21 @@ public final class AppViewModel: ObservableObject {
     /// first connect, cancelled on the last disconnect.
     private var heartbeatTask: Task<Void, Never>? = nil
 
+    /// Per-device `isConnected` subscriptions. CoreBluetooth fires
+    /// `didDisconnectPeripheral` on out-of-range / power loss; this maps that
+    /// into removing the device from the UI list (Android does this via its
+    /// connectionState collector).
+    private var connectionSubs: [String: AnyCancellable] = [:]
+
+    /// Heartbeat 응답 워치독: 연속으로 응답(RX)이 없는 워치독 대상 heartbeat 수.
+    /// RX가 오면 0으로 리셋된다. supervision timeout(최대 ~20초)보다 빠르게 끊김 감지.
+    private var missedHeartbeats = 0
+    private let maxMissedHeartbeats = 5
+    /// 펌웨어가 매 heartbeat마다 확실히 응답하는 page만 워치독 대상으로 삼는다.
+    /// Status(Main/Diag/Trend): 0x00/0x10, Echo(CH1/CH2·AVG): 0x01/0x05/0x11/0x15.
+    /// Calib/Pairing/Menu/Chatbot 등 무응답·미통신 화면은 제외 → 오탐 방지.
+    private let watchdogPages: Set<UInt16> = [0x00, 0x10, 0x01, 0x05, 0x11, 0x15]
+
     /// Active trend-stream parser (shared across devices since only one
     /// download flow is active at a time, matching Kotlin behaviour).
     private var trendParser: TrendStreamParser? = nil
@@ -314,6 +329,16 @@ public final class AppViewModel: ObservableObject {
         }
         notificationSubs[address] = sub
 
+        // OS 레벨 끊김(거리 멀어짐·전원 등)을 UI에 반영: isConnected=false 가 되면
+        // 해당 기기를 목록에서 제거한다. (초기값 true 는 guard 로 무시)
+        let connSub = gatt.$isConnected
+            .dropFirst()
+            .sink { [weak self] connected in
+                guard let self, !connected else { return }
+                Task { @MainActor in self.disconnectDevice(address) }
+            }
+        connectionSubs[address] = connSub
+
         var pairingResult = await requestPairing(gatt: gatt, deviceId: address, pin: pin)
         if pairingResult == nil {
             try? await Task.sleep(nanoseconds: 500_000_000)
@@ -481,6 +506,7 @@ public final class AppViewModel: ObservableObject {
 
     private func ensureHeartbeatRunning() {
         if heartbeatTask != nil { return }
+        missedHeartbeats = 0  // 새 heartbeat 세션 기준으로 워치독 초기화
         heartbeatTask = Task { @MainActor [weak self] in
             while let self, !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -489,11 +515,21 @@ public final class AppViewModel: ObservableObject {
                 guard let activeId = self.state.connectedDevices.first(where: { $0.id == self.state.activeDeviceId })?.id
                         ?? self.state.connectedDevices.first?.id,
                       let gatt = self.gattClients[activeId] else { continue }
+                let page = self.currentPageIndex
                 let frame = FrameCodec.buildHeartbeat(
-                    pageIndex: Int(self.currentPageIndex),
+                    pageIndex: Int(page),
                     expectedLen: 0
                 )
                 _ = await gatt.write(data: frame, withoutResponse: true)
+                // 응답 워치독: 펌웨어가 매초 응답하는 page를 보냈는데도 RX가
+                // maxMissedHeartbeats회 연속 없으면(=거리 멀어져 링크 끊김) 명시적으로 해제.
+                if self.watchdogPages.contains(page) {
+                    self.missedHeartbeats += 1
+                    if self.missedHeartbeats >= self.maxMissedHeartbeats {
+                        self.missedHeartbeats = 0
+                        self.disconnectDevice(activeId)
+                    }
+                }
             }
             // Loop exited — if devices reconnect, restart on next connect call.
             self?.heartbeatTask = nil
@@ -503,6 +539,8 @@ public final class AppViewModel: ObservableObject {
     // MARK: Notification handling — frame extraction + dispatch
 
     private func handleNotification(deviceId: String, bytes: [UInt8]) {
+        // 어떤 데이터든 수신되면 장비가 살아있다는 뜻 → 워치독 카운터 리셋
+        if !bytes.isEmpty { missedHeartbeats = 0 }
         // Per-device rxBuf
         var buf = rxBuffers[deviceId, default: []]
         buf.append(contentsOf: bytes)
@@ -815,6 +853,10 @@ public final class AppViewModel: ObservableObject {
 
         notificationSubs[physicalId]?.cancel()
         notificationSubs[physicalId] = nil
+        // 구독을 먼저 해제해야 아래 disconnect() → didDisconnect 콜백이 다시
+        // disconnectDevice 를 부르는 재진입을 막는다.
+        connectionSubs[physicalId]?.cancel()
+        connectionSubs[physicalId] = nil
         gattClients[physicalId]?.disconnect()
 
         for id in idsToRemove {
