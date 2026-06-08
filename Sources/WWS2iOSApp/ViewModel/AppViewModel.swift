@@ -81,6 +81,9 @@ public struct MainUiState: Equatable {
 
     // Scan
     public var connectingIds: Set<String> = []
+    /// 링크가 끊겨 자동 재연결 중인 기기들. connectedDevices에는 그대로 남아 있고(목록에서
+    /// 안 빠짐) UI는 "Reconnecting…"으로 표시한다. 사용자가 수동(✕) 해제 전까지 무한 재시도.
+    public var reconnectingIds: Set<String> = []
 
     public var deviceType: DeviceType = .density
     public var interfaceReading: InterfaceReading? = nil
@@ -145,6 +148,10 @@ public final class AppViewModel: ObservableObject {
     /// Calib/Pairing/Menu/Chatbot 등 무응답·미통신 화면은 제외 → 오탐 방지.
     private let watchdogPages: Set<UInt16> = [0x00, 0x10, 0x01, 0x05, 0x11, 0x15]
 
+    /// 물리주소별 자동 재연결 루프 Task. 3초 고정 간격으로 무한 재시도.
+    private var reconnectJobs: [String: Task<Void, Never>] = [:]
+    private let reconnectIntervalNs: UInt64 = 3_000_000_000
+
     /// Active trend-stream parser (shared across devices since only one
     /// download flow is active at a time, matching Kotlin behaviour).
     private var trendParser: TrendStreamParser? = nil
@@ -175,9 +182,18 @@ public final class AppViewModel: ObservableObject {
         !state.connectedDevices.isEmpty
     }
 
+    /// 재연결 중인 기기가 하나라도 있으면 true → TopBar 알약을 주황+깜빡임으로 표시.
+    public var isReconnecting: Bool {
+        state.connectedDevices.contains { state.reconnectingIds.contains($0.id) }
+    }
+
     public var statusLabel: String {
-        let count = state.connectedDevices.count
-        return count > 0 ? "\(count) Connected" : "Disconnected"
+        let reconnecting = state.connectedDevices.filter { state.reconnectingIds.contains($0.id) }.count
+        let live = state.connectedDevices.count - reconnecting
+        if reconnecting > 0 && live > 0 { return "\(reconnecting) Reconnecting · \(live) Connected" }
+        if reconnecting > 0 { return "\(reconnecting) Reconnecting" }
+        if live > 0 { return "\(live) Connected" }
+        return "Disconnected"
     }
 
     public var currentTitle: String {
@@ -329,13 +345,13 @@ public final class AppViewModel: ObservableObject {
         }
         notificationSubs[address] = sub
 
-        // OS 레벨 끊김(거리 멀어짐·전원 등)을 UI에 반영: isConnected=false 가 되면
-        // 해당 기기를 목록에서 제거한다. (초기값 true 는 guard 로 무시)
+        // OS 레벨 끊김(거리 멀어짐·전원 등) 시 자동 재연결을 시작한다.
+        // (초기값 true 는 dropFirst 로 무시)
         let connSub = gatt.$isConnected
             .dropFirst()
             .sink { [weak self] connected in
                 guard let self, !connected else { return }
-                Task { @MainActor in self.disconnectDevice(address) }
+                Task { @MainActor in self.beginReconnect(address) }
             }
         connectionSubs[address] = connSub
 
@@ -522,12 +538,12 @@ public final class AppViewModel: ObservableObject {
                 )
                 _ = await gatt.write(data: frame, withoutResponse: true)
                 // 응답 워치독: 펌웨어가 매초 응답하는 page를 보냈는데도 RX가
-                // maxMissedHeartbeats회 연속 없으면(=거리 멀어져 링크 끊김) 명시적으로 해제.
+                // maxMissedHeartbeats회 연속 없으면(=거리 멀어져 링크 끊김) 재연결을 시작한다.
                 if self.watchdogPages.contains(page) {
                     self.missedHeartbeats += 1
                     if self.missedHeartbeats >= self.maxMissedHeartbeats {
                         self.missedHeartbeats = 0
-                        self.disconnectDevice(activeId)
+                        self.beginReconnect(activeId)
                     }
                 }
             }
@@ -844,12 +860,77 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
+    /// 링크가 끊긴 기기를 목록에서 빼지 않고 "재연결 중" 상태로 두고 3초 간격으로 무한 재연결.
+    /// 펌웨어는 PIN 인증(0xF0) 없이도 데이터 명령에 응답하므로 재연결 시 페어링은 생략한다.
+    private func beginReconnect(_ deviceId: String) {
+        let address = DeviceRouting.physicalDeviceId(for: deviceId)
+        if reconnectJobs[address] != nil { return }
+        if state.reconnectingIds.contains(where: { DeviceRouting.physicalDeviceId(for: $0) == address }) { return }
+        let ids = state.connectedDevices.map(\.id).filter { DeviceRouting.physicalDeviceId(for: $0) == address }
+        if ids.isEmpty { return }
+
+        state.reconnectingIds.formUnion(ids)
+
+        reconnectJobs[address] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // 끊긴 링크/구독 정리 (목록은 유지). heartbeat 루프는 gattClients[active]==nil 이면 자동으로 쉰다.
+            self.notificationSubs[address]?.cancel(); self.notificationSubs[address] = nil
+            self.connectionSubs[address]?.cancel(); self.connectionSubs[address] = nil
+            self.gattClients[address]?.disconnect()
+            for id in ids { self.gattClients[id] = nil }
+            self.gattClients[address] = nil
+
+            // 3초 고정 간격으로 성공할 때까지(또는 수동 해제 전까지) 무한 반복.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: self.reconnectIntervalNs)
+                if Task.isCancelled { break }
+                if await self.attemptReconnect(address) { break }
+            }
+            self.reconnectJobs[address] = nil
+        }
+    }
+
+    /// 재연결 1회 시도: BLE 링크만 다시 연결하고(페어링 생략) 기존 기기 id에 새 세션을 매핑한다.
+    private func attemptReconnect(_ address: String) async -> Bool {
+        guard let peripheral = scanner.getRemoteDevice(address) else { return false }
+        let gatt = GattClient(scanner: scanner)
+        let ok = await gatt.connect(peripheral: peripheral)
+        if !ok { gatt.disconnect(); return false }
+
+        // 도중에 수동 해제됐을 수 있으니 현재 목록 기준으로 다시 계산
+        let ids = state.connectedDevices.map(\.id).filter { DeviceRouting.physicalDeviceId(for: $0) == address }
+        if ids.isEmpty { gatt.disconnect(); return false }
+
+        let sub = gatt.notifications.sink { [weak self] bytes in
+            Task { @MainActor in self?.handleNotification(deviceId: address, bytes: bytes) }
+        }
+        notificationSubs[address] = sub
+        let connSub = gatt.$isConnected
+            .dropFirst()
+            .sink { [weak self] connected in
+                guard let self, !connected else { return }
+                Task { @MainActor in self.beginReconnect(address) }
+            }
+        connectionSubs[address] = connSub
+
+        gattClients[address] = gatt
+        for id in ids { gattClients[id] = gatt }
+        state.reconnectingIds.subtract(ids)
+        ensureHeartbeatRunning()
+        return true
+    }
+
     public func disconnectDevice(_ deviceId: String) {
         let physicalId = DeviceRouting.physicalDeviceId(for: deviceId)
         let relatedIds = state.connectedDevices
             .map(\.id)
             .filter { $0 == physicalId || DeviceRouting.physicalDeviceId(for: $0) == physicalId }
         let idsToRemove = Set(relatedIds + [physicalId])
+
+        // 수동 해제 시 진행 중인 재연결 루프도 취소하고 재연결 표시도 정리
+        reconnectJobs[physicalId]?.cancel()
+        reconnectJobs[physicalId] = nil
+        state.reconnectingIds.subtract(idsToRemove)
 
         notificationSubs[physicalId]?.cancel()
         notificationSubs[physicalId] = nil

@@ -10,6 +10,7 @@ public enum AppColors {
     public static let border        = Color(hex: 0xD1D6DB)
     public static let error         = Color(hex: 0xEB5757)
     public static let success       = Color(hex: 0x34C759)
+    public static let reconnecting  = Color(hex: 0xFF9500)  // 주황(앰버): 재연결 중 상태
     public static let temperature   = Color(hex: 0xE03131)
     public static let white         = Color(hex: 0xFFFFFF)
     public static let lightGray     = Color(hex: 0xF8F9FA)

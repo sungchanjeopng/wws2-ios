@@ -20,13 +20,15 @@ public struct MainTabScreen: View {
                 DeviceStripBar(
                     devices: devices,
                     selectedDeviceId: vm.state.activeDeviceId,
+                    reconnectingIds: vm.state.reconnectingIds,
                     onDeviceTap: { vm.requestConnectDevice($0) },
                     onMoreTap: { vm.openPairing() }
                 )
                 DeviceCardLarge(
                     device: activeDevice,
                     reading: vm.state.deviceReadings[activeDevice.id],
-                    densUnit: densUnit
+                    densUnit: densUnit,
+                    isReconnecting: vm.state.reconnectingIds.contains(activeDevice.id)
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -67,6 +69,7 @@ private struct DeviceCardLarge: View {
     let device: ConnectedBleDevice
     let reading: DeviceReading?
     let densUnit: DensityUnit
+    var isReconnecting: Bool = false
     var body: some View {
         let isInterface = device.label.hasPrefix("ENV130")
         ZStack(alignment: .topLeading) {
@@ -82,7 +85,7 @@ private struct DeviceCardLarge: View {
 
             // Device label top-left
             HStack(spacing: 8) {
-                Circle().fill(AppColors.success).frame(width: 8, height: 8)
+                Circle().fill(isReconnecting ? AppColors.reconnecting : AppColors.success).frame(width: 8, height: 8)
                 Text(device.label)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AppColors.darkText)

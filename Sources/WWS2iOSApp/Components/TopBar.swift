@@ -11,6 +11,7 @@ public struct TopBar: View {
     public let title: String
     public var showBack: Bool = false
     public var rxBlink: Bool = false
+    public var isReconnecting: Bool = false
     public var onBackTap: () -> Void = {}
     public var onBleTap: () -> Void = {}
 
@@ -20,6 +21,7 @@ public struct TopBar: View {
         title: String,
         showBack: Bool = false,
         rxBlink: Bool = false,
+        isReconnecting: Bool = false,
         onBackTap: @escaping () -> Void = {},
         onBleTap: @escaping () -> Void = {}
     ) {
@@ -28,6 +30,7 @@ public struct TopBar: View {
         self.title = title
         self.showBack = showBack
         self.rxBlink = rxBlink
+        self.isReconnecting = isReconnecting
         self.onBackTap = onBackTap
         self.onBleTap = onBleTap
     }
@@ -56,6 +59,7 @@ public struct TopBar: View {
                 isConnected: isConnected,
                 label: statusLabel,
                 rxBlink: rxBlink,
+                isReconnecting: isReconnecting,
                 onTap: onBleTap
             )
         }
@@ -70,30 +74,50 @@ public struct BlePillButton: View {
     public let isConnected: Bool
     public let label: String
     public var rxBlink: Bool = false
+    public var isReconnecting: Bool = false
     public var onTap: () -> Void = {}
+
+    // 재연결 중일 때 점 깜빡임용 불투명도
+    @State private var dotOpacity: Double = 1.0
+
+    private var active: Bool { isConnected || isReconnecting }
 
     public var body: some View {
         Button(action: onTap) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(isConnected ? Color.white : AppColors.grayLabel)
+                    .fill(active ? Color.white : AppColors.grayLabel)
                     .frame(width: 8, height: 8)
+                    .opacity(isReconnecting ? dotOpacity : 1.0)
                 Text(label)
                     .font(.system(size: 16, weight: .bold))
                     .kerning(-0.2)
-                    .foregroundStyle(isConnected ? Color.white : AppColors.grayLabel)
+                    .foregroundStyle(active ? Color.white : AppColors.grayLabel)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(
-                isConnected
-                    ? AppColors.success.opacity(rxBlink ? 0.7 : 1.0)
-                    : AppColors.pillDisconnected
+                isReconnecting
+                    ? AppColors.reconnecting
+                    : (isConnected ? AppColors.success.opacity(rxBlink ? 0.7 : 1.0) : AppColors.pillDisconnected)
             )
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+        .onAppear { updateBlink() }
+        .onChange(of: isReconnecting) { _ in updateBlink() }
+    }
+
+    private func updateBlink() {
+        if isReconnecting {
+            dotOpacity = 1.0
+            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                dotOpacity = 0.2
+            }
+        } else {
+            withAnimation(.default) { dotOpacity = 1.0 }
+        }
     }
 }

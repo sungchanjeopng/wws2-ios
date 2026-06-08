@@ -29,6 +29,7 @@ public struct TrendTabScreen: View {
                 DeviceStripBar(
                     devices: devices,
                     selectedDeviceId: activeId,
+                    reconnectingIds: vm.state.reconnectingIds,
                     onDeviceTap: { vm.requestConnectDevice($0) },
                     onMoreTap: { vm.openPairing() }
                 )

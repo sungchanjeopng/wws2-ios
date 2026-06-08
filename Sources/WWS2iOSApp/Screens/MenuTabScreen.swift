@@ -14,6 +14,7 @@ public struct MenuTabScreen: View {
                     DeviceStripBar(
                         devices: vm.state.connectedDevices,
                         selectedDeviceId: vm.state.activeDeviceId,
+                        reconnectingIds: vm.state.reconnectingIds,
                         onDeviceTap: { vm.requestConnectDevice($0) },
                         onMoreTap: { vm.openPairing() }
                     )

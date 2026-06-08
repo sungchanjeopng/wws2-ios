@@ -31,6 +31,7 @@ public struct MainShellView: View {
                     title: vm.currentTitle,
                     showBack: vm.state.tabIndex == 4 && vm.state.subPage != nil,
                     rxBlink: vm.state.rxBlink,
+                    isReconnecting: vm.isReconnecting,
                     onBackTap: { vm.handleTopBarBack() },
                     onBleTap: { vm.openPairing() }
                 )
