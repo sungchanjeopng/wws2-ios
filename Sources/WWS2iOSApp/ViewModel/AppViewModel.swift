@@ -85,6 +85,12 @@ public struct MainUiState: Equatable {
     /// 안 빠짐) UI는 "Reconnecting…"으로 표시한다. 사용자가 수동(✕) 해제 전까지 무한 재시도.
     public var reconnectingIds: Set<String> = []
 
+    // Report (ENV130) — 기기 선택 → BLE 수집 → 리포트 표시
+    public var reportStage: ReportStage = .select
+    public var reportTargetId: String = ""
+    public var reportData: ReportData? = nil
+    public var reportError: String? = nil
+
     public var deviceType: DeviceType = .density
     public var interfaceReading: InterfaceReading? = nil
 
@@ -202,6 +208,7 @@ public final class AppViewModel: ObservableObject {
         case (4, "calib"):    return "Calibration"
         case (4, "upload"):   return "Firmware Update"
         case (4, "download"): return "Data Files"
+        case (4, "report"):   return "Report"
         case (4, _):          return "Menu"
         case (0, _):          return "Main"
         case (1, _):          return "Echo"
@@ -236,6 +243,22 @@ public final class AppViewModel: ObservableObject {
         resetInterfaceEchoStreamState(clearAllBuffers: true)
         state.tabIndex = 4
         state.subPage = "calib"
+    }
+    public func openReport()   {
+        stopScanIfPairingActive()
+        resetInterfaceEchoStreamState(clearAllBuffers: true)
+        state.tabIndex = 4
+        state.subPage = "report"
+        state.reportStage = .select
+        state.reportTargetId = ""
+        state.reportData = nil
+        state.reportError = nil
+    }
+    public func backToReportSelect() {
+        state.reportStage = .select
+        state.reportTargetId = ""
+        state.reportData = nil
+        state.reportError = nil
     }
     public func openUpload()   {
         stopScanIfPairingActive()
@@ -484,6 +507,10 @@ public final class AppViewModel: ObservableObject {
         // request. Do not send it as a 1 Hz page heartbeat while the user is just
         // looking at the Data Files list, viewing a saved CSV, or after completion.
         if state.tabIndex == 4 && state.subPage == "download" {
+            return true
+        }
+        // 리포트 화면에선 자체 수집 시퀀스가 명령을 직접 보내므로 자동 heartbeat 정지.
+        if state.tabIndex == 4 && state.subPage == "report" {
             return true
         }
         return false
@@ -1264,6 +1291,10 @@ public final class AppViewModel: ObservableObject {
             } else {
                 state.subPage = nil
             }
+        case "report":
+            // 리포트 결과 화면이면 기기 선택으로, 선택 화면이면 메뉴로
+            if state.reportStage != .select { backToReportSelect() }
+            else { state.subPage = nil }
         default:
             state.subPage = nil
         }
@@ -1322,6 +1353,101 @@ public final class AppViewModel: ObservableObject {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(filename)
         try? content.data(using: .utf8)?.write(to: url, options: [.atomic])
+        return url
+    }
+
+    // MARK: Report (ENV130)
+
+    /// 선택한 채널에 대해 리포트를 생성한다.
+    /// 캐시가 아니라 BLE로 직접 STATUS(측정+설정) → ECHO 실시간 → ECHO 평균을 수집한다.
+    public func selectReportDevice(_ id: String) {
+        state.reportTargetId = id
+        state.reportStage = .collecting
+        state.reportData = nil
+        state.reportError = nil
+
+        Task { @MainActor in
+            // 대상 채널을 활성화 (echo 파싱이 이 기기로 라우팅되도록)
+            if let dev = state.connectedDevices.first(where: { $0.id == id }) {
+                state.activeDeviceId = id
+                state.activeDeviceLabel = dev.label
+                state.deviceType = dev.deviceType == 1 ? .interface_ : .density
+            }
+            resetInterfaceEchoStreamState(clearAllBuffers: true)
+            try? await Task.sleep(nanoseconds: 400_000_000)
+
+            let physicalId = DeviceRouting.physicalDeviceId(for: id)
+            guard let gatt = gattClients[id] ?? gattClients[physicalId] else {
+                state.reportStage = .error
+                state.reportError = "No connection"
+                return
+            }
+            let isCh2 = id.hasSuffix("_CH2")
+            let statusPage: UInt16 = isCh2 ? 0x10 : 0x00
+            let realPage: UInt16 = isCh2 ? 0x11 : 0x01
+            let avgPage: UInt16 = isCh2 ? 0x15 : 0x05
+
+            // ① STATUS (측정값 + 설정값 동시)
+            for _ in 0..<3 {
+                let f = FrameCodec.buildHeartbeat(pageIndex: Int(statusPage), expectedLen: 0)
+                _ = await gatt.write(data: f, withoutResponse: true)
+                try? await Task.sleep(nanoseconds: 350_000_000)
+            }
+            // ② ECHO 실시간 → ③ ECHO 평균
+            let realEcho = await requestEchoWaveform(gatt, page: realPage)
+            let avgEcho = await requestEchoWaveform(gatt, page: avgPage)
+
+            let dev = state.connectedDevices.first(where: { $0.id == id })
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            let data = ReportData(
+                deviceId: id,
+                label: dev?.label ?? id,
+                firmwareVersion: dev?.firmwareVersion ?? "",
+                timestamp: fmt.string(from: Date()),
+                lightLevel: realEcho?.lightLevel ?? avgEcho?.lightLevel ?? 0.0,
+                heavyLevel: realEcho?.heavyLevel ?? avgEcho?.heavyLevel ?? 0.0,
+                temperatureC: state.temperatureC,
+                currentMA: state.currentMA,
+                freqMHz: state.freqMHz,
+                offset: state.offset,
+                emptyDistance: state.emptyDistance,
+                deadZone: state.deadZone,
+                set4mA: state.set4mA,
+                set20mA: state.set20mA,
+                damping: state.damping,
+                realEcho: realEcho,
+                avgEcho: avgEcho
+            )
+            state.reportData = data
+            state.reportStage = .done
+        }
+    }
+
+    /// echo page를 보내고 새 interfaceEchoReading 을 timeout 동안 기다린다.
+    private func requestEchoWaveform(_ gatt: GattClient, page: UInt16, timeout: TimeInterval = 4.0) async -> InterfaceEchoReading? {
+        let before = state.interfaceEchoReading
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            let frame = FrameCodec.buildHeartbeat(pageIndex: Int(page), expectedLen: 0)
+            _ = await gatt.write(data: frame, withoutResponse: true)
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if let cur = state.interfaceEchoReading, cur != before { return cur }
+        }
+        let cur = state.interfaceEchoReading
+        return (cur != before) ? cur : nil
+    }
+
+    /// 현재 리포트를 수정 가능한 HTML 파일로 만들어 공유용 URL 을 반환한다.
+    public func shareReportHtml() -> URL? {
+        guard let data = state.reportData else { return nil }
+        let html = ReportHtmlExporter.buildHtml(data)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("WESSWARE_reports")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let safe = data.label.replacingOccurrences(of: " ", with: "_")
+        let stamp = Int(Date().timeIntervalSince1970)
+        let url = dir.appendingPathComponent("Report_\(safe)_\(stamp).html")
+        try? html.data(using: .utf8)?.write(to: url, options: [.atomic])
         return url
     }
 

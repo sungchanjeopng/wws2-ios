@@ -46,6 +46,15 @@ public struct MenuTabScreen: View {
                 )
 
                 MenuCard(
+                    systemIcon: "doc.richtext.fill",
+                    iconBg: Color(hex: 0xEDE9FE),
+                    iconColor: Color(hex: 0x7C3AED),
+                    title: "Report",
+                    trailing: { AnyView(EmptyView()) },
+                    onTap: { vm.openReport() }
+                )
+
+                MenuCard(
                     systemIcon: "icloud.and.arrow.up.fill",
                     iconBg: Color(hex: 0xE6F9F1),
                     iconColor: AppColors.success,
