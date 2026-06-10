@@ -14,6 +14,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import UIKit
 import CoreBluetooth
 import WWS2Core
 import WWS2BLE
@@ -1439,6 +1440,12 @@ public final class AppViewModel: ObservableObject {
                 set4mA: state.set4mA,
                 set20mA: state.set20mA,
                 damping: state.damping,
+                thrLightSet:  realEcho?.thrLightSet  ?? avgEcho?.thrLightSet  ?? 0,
+                thrLightMode: realEcho?.thrLightMode ?? avgEcho?.thrLightMode ?? 0,
+                thrHeavySet:  realEcho?.thrHeavySet  ?? avgEcho?.thrHeavySet  ?? 0,
+                thrHeavyMode: realEcho?.thrHeavyMode ?? avgEcho?.thrHeavyMode ?? 0,
+                echoAmp:      realEcho?.echoAmp      ?? avgEcho?.echoAmp      ?? 0,
+                relay:        state.relay,
                 realEcho: realEcho,
                 avgEcho: avgEcho
             )
@@ -1461,16 +1468,37 @@ public final class AppViewModel: ObservableObject {
         return (cur != before) ? cur : nil
     }
 
-    /// 현재 리포트를 수정 가능한 HTML 파일로 만들어 공유용 URL 을 반환한다.
+    /// 현재 리포트를 PDF 로 렌더링해 공유용 URL 을 반환한다. UIPrintPageRenderer
+    /// + UIGraphicsPDFRenderer 표준 파이프라인으로 페이지 분할/이미지 임베드를
+    /// 자동 처리한다.
     public func shareReportHtml() -> URL? {
         guard let data = state.reportData else { return nil }
         let html = ReportHtmlExporter.buildHtml(data)
+
+        let formatter = UIMarkupTextPrintFormatter(markupText: html)
+        let renderer = UIPrintPageRenderer()
+        renderer.addPrintFormatter(formatter, startingAtPageAt: 0)
+
+        // A4 portrait at 72 DPI: 595.2 x 841.8 points.
+        let pageSize = CGSize(width: 595.2, height: 841.8)
+        let pageRect = CGRect(origin: .zero, size: pageSize)
+        renderer.setValue(NSValue(cgRect: pageRect), forKey: "paperRect")
+        renderer.setValue(NSValue(cgRect: pageRect), forKey: "printableRect")
+
+        let pdfData = NSMutableData()
+        UIGraphicsBeginPDFContextToData(pdfData, pageRect, nil)
+        for i in 0..<renderer.numberOfPages {
+            UIGraphicsBeginPDFPage()
+            renderer.drawPage(at: i, in: UIGraphicsGetPDFContextBounds())
+        }
+        UIGraphicsEndPDFContext()
+
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("WESSWARE_reports")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let safe = data.label.replacingOccurrences(of: " ", with: "_")
         let stamp = Int(Date().timeIntervalSince1970)
-        let url = dir.appendingPathComponent("Report_\(safe)_\(stamp).html")
-        try? html.data(using: .utf8)?.write(to: url, options: [.atomic])
+        let url = dir.appendingPathComponent("Report_\(safe)_\(stamp).pdf")
+        pdfData.write(to: url, atomically: true)
         return url
     }
 

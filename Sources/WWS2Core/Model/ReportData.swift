@@ -27,6 +27,13 @@ public struct ReportData: Equatable, Sendable {
     public let set4mA: Double
     public let set20mA: Double
     public let damping: Int
+    // 임계값/게인/릴레이 (ECHO + STATUS)
+    public let thrLightSet: Int
+    public let thrLightMode: Int   // 0=Auto(%), 1=Manual(0.1V)
+    public let thrHeavySet: Int
+    public let thrHeavyMode: Int
+    public let echoAmp: Int
+    public let relay: Int
     // 파형
     public let realEcho: InterfaceEchoReading?
     public let avgEcho: InterfaceEchoReading?
@@ -36,6 +43,9 @@ public struct ReportData: Equatable, Sendable {
         lightLevel: Double, heavyLevel: Double, temperatureC: Double, currentMA: Double,
         freqMHz: Double, offset: Double, emptyDistance: Double, deadZone: Double,
         set4mA: Double, set20mA: Double, damping: Int,
+        thrLightSet: Int = 0, thrLightMode: Int = 0,
+        thrHeavySet: Int = 0, thrHeavyMode: Int = 0,
+        echoAmp: Int = 0, relay: Int = 0,
         realEcho: InterfaceEchoReading?, avgEcho: InterfaceEchoReading?
     ) {
         self.deviceId = deviceId
@@ -53,6 +63,12 @@ public struct ReportData: Equatable, Sendable {
         self.set4mA = set4mA
         self.set20mA = set20mA
         self.damping = damping
+        self.thrLightSet = thrLightSet
+        self.thrLightMode = thrLightMode
+        self.thrHeavySet = thrHeavySet
+        self.thrHeavyMode = thrHeavyMode
+        self.echoAmp = echoAmp
+        self.relay = relay
         self.realEcho = realEcho
         self.avgEcho = avgEcho
     }
