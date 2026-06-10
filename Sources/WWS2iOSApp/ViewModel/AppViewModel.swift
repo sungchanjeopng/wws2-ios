@@ -148,6 +148,9 @@ public final class AppViewModel: ObservableObject {
     /// Heartbeat 응답 워치독: 연속으로 응답(RX)이 없는 워치독 대상 heartbeat 수.
     /// RX가 오면 0으로 리셋된다. supervision timeout(최대 ~20초)보다 빠르게 끊김 감지.
     private var missedHeartbeats = 0
+    // Timestamp of last response notification — used by sendAppSetting to wait
+    // for an idle window before writing a setting frame.
+    private var lastHeartbeatAckAt: Date = .distantPast
     private let maxMissedHeartbeats = 5
     /// 펌웨어가 매 heartbeat마다 확실히 응답하는 page만 워치독 대상으로 삼는다.
     /// Status(Main/Diag/Trend): 0x00/0x10, Echo(CH1/CH2·AVG): 0x01/0x05/0x11/0x15.
@@ -583,7 +586,10 @@ public final class AppViewModel: ObservableObject {
 
     private func handleNotification(deviceId: String, bytes: [UInt8]) {
         // 어떤 데이터든 수신되면 장비가 살아있다는 뜻 → 워치독 카운터 리셋
-        if !bytes.isEmpty { missedHeartbeats = 0 }
+        if !bytes.isEmpty {
+            missedHeartbeats = 0
+            lastHeartbeatAckAt = Date()
+        }
         // Per-device rxBuf
         var buf = rxBuffers[deviceId, default: []]
         buf.append(contentsOf: bytes)
@@ -866,54 +872,71 @@ public final class AppViewModel: ObservableObject {
     /// Ported from MainViewModel.kt:298-309. Sends an app-setting write
     /// frame (SOF=0x03) to the currently active device. Returns immediately;
     /// the result is surfaced through `snackbarMessage`.
-    public func sendAppSetting(baseCmd: Int, value: Int) {
+    /// Sends a setting frame and returns true only after the matching state
+    /// field changes within 10s — proves the firmware actually applied it.
+    /// Waits for a heartbeat-response idle window first (avoids racing an
+    /// in-flight waveform reply).
+    @discardableResult
+    public func sendAppSetting(baseCmd: Int, value: Int) async -> Bool {
         let activeId = state.activeDeviceId
-        guard !activeId.isEmpty else {
-            snackbarMessage = "No active device."
-            return
-        }
+        guard !activeId.isEmpty else { return false }
         let physicalId = DeviceRouting.physicalDeviceId(for: activeId)
-        guard let gatt = gattClients[physicalId] else {
-            snackbarMessage = "No active device."
-            return
+        guard let gatt = gattClients[physicalId] else { return false }
+
+        // Snapshot the relevant field BEFORE writing.
+        let before = readSettingFieldKey(baseCmd)
+
+        // Wait for the next heartbeat ack (1.5s timeout) to land in idle window.
+        let waitStart = lastHeartbeatAckAt
+        let waitDeadline = Date().addingTimeInterval(1.5)
+        while Date() < waitDeadline {
+            if lastHeartbeatAckAt > waitStart { break }
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
+        // Idle margin: firmware finishes its post-response bookkeeping.
+        try? await Task.sleep(nanoseconds: 150_000_000)
+
         let cmd = appSettingCmd(baseCmd: baseCmd)
         let frame = FrameCodec.buildSettingFrame(cmd: cmd, data: value)
-        Task { [weak self] in
-            let ok = await gatt.write(data: frame, withoutResponse: false)
-            await MainActor.run {
-                self?.snackbarMessage = ok ? "Setting sent." : "Setting failed."
-            }
+        let sent = await gatt.write(data: frame, withoutResponse: false)
+        if !sent { return false }
+
+        // Poll the same field for up to 10s — change == success.
+        let pollDeadline = Date().addingTimeInterval(10.0)
+        while Date() < pollDeadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            if readSettingFieldKey(baseCmd) != before { return true }
+        }
+        return false
+    }
+
+    private func readSettingFieldKey(_ baseCmd: Int) -> String {
+        let ifReading = state.interfaceEchoReading
+        switch baseCmd {
+        case 1:    return "1:\(ifReading?.echoAmp ?? -1)"
+        case 2, 4: return "24:\(ifReading?.thrLightSet ?? -1)"
+        case 3, 5: return "35:\(ifReading?.thrHeavySet ?? -1)"
+        case 6:    return "6:\(state.freqMHz)"
+        case 7:    return "7:\(state.offset)"
+        case 8:    return "8:\(state.set4mA)"
+        case 9:    return "9:\(state.set20mA)"
+        case 11:   return "11:\(state.damping)"
+        case 12:   return "12:\(state.emptyDistance)"
+        case 13:   return "13:\(state.deadZone)"
+        default:   return "unknown"
         }
     }
 
-    /// 링크가 끊긴 기기를 목록에서 빼지 않고 "재연결 중" 상태로 두고 3초 간격으로 무한 재연결.
-    /// 펌웨어는 PIN 인증(0xF0) 없이도 데이터 명령에 응답하므로 재연결 시 페어링은 생략한다.
+    /// Reconnect is disabled — when the BLE link drops we tear down the device
+    /// entry immediately and surface a "Signal too weak" dialog so the user
+    /// can manually re-pair via the BleErrorDialog.
     private func beginReconnect(_ deviceId: String) {
         let address = DeviceRouting.physicalDeviceId(for: deviceId)
-        if reconnectJobs[address] != nil { return }
-        if state.reconnectingIds.contains(where: { DeviceRouting.physicalDeviceId(for: $0) == address }) { return }
         let ids = state.connectedDevices.map(\.id).filter { DeviceRouting.physicalDeviceId(for: $0) == address }
         if ids.isEmpty { return }
-
-        state.reconnectingIds.formUnion(ids)
-
-        reconnectJobs[address] = Task { @MainActor [weak self] in
-            guard let self else { return }
-            // 끊긴 링크/구독 정리 (목록은 유지). heartbeat 루프는 gattClients[active]==nil 이면 자동으로 쉰다.
-            self.notificationSubs[address]?.cancel(); self.notificationSubs[address] = nil
-            self.connectionSubs[address]?.cancel(); self.connectionSubs[address] = nil
-            self.gattClients[address]?.disconnect()
-            for id in ids { self.gattClients[id] = nil }
-            self.gattClients[address] = nil
-
-            // 3초 고정 간격으로 성공할 때까지(또는 수동 해제 전까지) 무한 반복.
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: self.reconnectIntervalNs)
-                if Task.isCancelled { break }
-                if await self.attemptReconnect(address) { break }
-            }
-            self.reconnectJobs[address] = nil
+        bleError = BleErrorState(message: "Signal too weak. Connection closed.", retryAddress: address)
+        if let firstId = ids.first {
+            disconnectDevice(firstId)
         }
     }
 

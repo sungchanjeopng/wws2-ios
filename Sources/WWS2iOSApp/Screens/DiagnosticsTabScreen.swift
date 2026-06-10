@@ -97,12 +97,13 @@ public struct DiagnosticsTabScreen: View {
                 .padding(12)
             }
             .sheet(item: $edit) { cfg in
-                ConfigEditSheet(config: cfg, onApply: { value in
-                    vm.sendAppSetting(baseCmd: cfg.cmd, value: value)
-                    edit = nil
-                }, onCancel: {
-                    edit = nil
-                })
+                ConfigEditSheet(
+                    config: cfg,
+                    onApply: { value in
+                        await vm.sendAppSetting(baseCmd: cfg.cmd, value: value)
+                    },
+                    onCancel: { edit = nil }
+                )
                 .presentationDetents([.medium])
             }
         }
@@ -257,16 +258,19 @@ private struct InterfaceStatusPanel: View {
 ///       - else: single integer text field
 ///   - "Apply" is disabled when the parsed value falls outside [min, max]
 ///   - "Cancel" dismisses without writing
+private enum DiagSendingState { case idle, sending, done, failed }
+
 struct ConfigEditSheet: View {
     let config: ConfigEdit
-    let onApply: (Int) -> Void
+    let onApply: (Int) async -> Bool
     let onCancel: () -> Void
 
     @State private var stepperValue: Int
     @State private var intText: String
     @State private var fracText: String
+    @State private var sendingState: DiagSendingState = .idle
 
-    init(config: ConfigEdit, onApply: @escaping (Int) -> Void, onCancel: @escaping () -> Void) {
+    init(config: ConfigEdit, onApply: @escaping (Int) async -> Bool, onCancel: @escaping () -> Void) {
         self.config = config
         self.onApply = onApply
         self.onCancel = onCancel
@@ -424,32 +428,78 @@ struct ConfigEditSheet: View {
 
             Spacer()
 
-            // Action buttons
-            HStack(spacing: 12) {
-                Button(action: onCancel) {
-                    Text("Cancel")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(AppColors.lightGray)
-                        .foregroundStyle(AppColors.darkText)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
+            // Action buttons (state-driven)
+            Group {
+                switch sendingState {
+                case .idle:
+                    HStack(spacing: 12) {
+                        Button(action: onCancel) {
+                            Text("Cancel")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(AppColors.lightGray)
+                                .foregroundStyle(AppColors.darkText)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
 
-                Button {
-                    if let v = parsedValue { onApply(v) }
-                } label: {
-                    Text("Apply")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(parsedValue == nil ? AppColors.weakText : AppColors.primary)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        Button {
+                            guard let v = parsedValue else { return }
+                            Task {
+                                sendingState = .sending
+                                let ok = await onApply(v)
+                                sendingState = ok ? .done : .failed
+                                if ok {
+                                    try? await Task.sleep(nanoseconds: 800_000_000)
+                                    onCancel()
+                                }
+                            }
+                        } label: {
+                            Text("Apply")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(parsedValue == nil ? AppColors.weakText : AppColors.primary)
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(parsedValue == nil)
+                    }
+                case .sending:
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("Sending...")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(AppColors.darkText)
+                    }
+                case .done:
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(AppColors.success)
+                        Text("Success")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(AppColors.success)
+                    }
+                case .failed:
+                    VStack(spacing: 12) {
+                        Text("✗ Failed")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(AppColors.error)
+                        Button(action: onCancel) {
+                            Text("Close")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(AppColors.lightGray)
+                                .foregroundStyle(AppColors.darkText)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(parsedValue == nil)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
