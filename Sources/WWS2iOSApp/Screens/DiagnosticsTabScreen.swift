@@ -239,8 +239,6 @@ private struct InterfaceStatusPanel: View {
                     value: "\(tUnit.format(celsius: state.temperatureC)) \(tUnit.unitStr)")
             DiagRow(label: "Current",
                     value: String(format: "%.2f mA", state.currentMA))
-            DiagRow(label: "Relay",
-                    value: state.relay == 1 ? "Act" : "Stop")
         }
         .frame(maxWidth: .infinity)
         .background(AppColors.white)

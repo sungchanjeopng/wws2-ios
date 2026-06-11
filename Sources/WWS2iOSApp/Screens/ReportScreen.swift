@@ -154,7 +154,6 @@ private struct ReportResult: View {
                          ("Current 20mA", String(format: "%.2f m", data.set20mA))),
                         (("Temperature", String(format: "%.1f °C", data.temperatureC)),
                          ("Current", String(format: "%.2f mA", data.currentMA))),
-                        (("Relay", String(format: "0x%02X", data.relay)), nil),
                     ])
                     Spacer().frame(height: 22)
 

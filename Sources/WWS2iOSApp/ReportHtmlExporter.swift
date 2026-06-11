@@ -168,8 +168,7 @@ enum ReportHtmlExporter {
             row4("Current 4mA", String(format: "%.2f m", data.set4mA),
                  "Current 20mA", String(format: "%.2f m", data.set20mA)) +
             row4("Temperature", String(format: "%.1f °C", data.temperatureC),
-                 "Current", String(format: "%.2f mA", data.currentMA)) +
-            row4("Relay", String(format: "0x%02X", data.relay), nil, nil)
+                 "Current", String(format: "%.2f mA", data.currentMA))
         let echoSettings =
             row("Thr.Light", thrLightStr) +
             row("Thr.Heavy", thrHeavyStr)

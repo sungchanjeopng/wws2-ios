@@ -30,7 +30,7 @@ public struct InterfaceEchoChart: View {
         .padding(.leading, 12)
         .padding(.trailing, 12)
         .padding(.top, 12)
-        .padding(.bottom, 28)
+        .padding(.bottom, 12)
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: AppColors.cardShadow, radius: 4, y: 2)
@@ -38,7 +38,12 @@ public struct InterfaceEchoChart: View {
 
     private func draw(context: GraphicsContext, size: CGSize) {
         let w = size.width
-        let h = size.height
+        // SwiftUI Canvas clips to its own bounds, so the x-axis label strip
+        // must live INSIDE the canvas — reserve the bottom for it. (Android's
+        // Compose Canvas doesn't clip, which is why the same h+4 drawText
+        // worked there but silently disappeared here.)
+        let axisPad: CGFloat = 18
+        let h = size.height - axisPad
 
         guard let reading = echo, !reading.wave.isEmpty else {
             let label = Text("No Data").font(.system(size: 16)).foregroundColor(echoColLabel)
