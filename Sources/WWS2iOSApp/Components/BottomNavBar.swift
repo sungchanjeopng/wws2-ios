@@ -2,7 +2,15 @@
 
 import SwiftUI
 
-private let labels = ["Main", "Echo", "Trend", "Param", "Menu"]
+// Tab indices stay stable (Main=0, Echo=1, Param=3, Menu=4) so the
+// ViewModel's tabIndex-based logic stays untouched; the Trend tab
+// (index 2) is simply not offered any more.
+private let tabs: [(String, Int)] = [
+    ("Main", 0),
+    ("Echo", 1),
+    ("Param", 3),
+    ("Menu", 4),
+]
 
 public struct BottomNavBar: View {
     public let currentIndex: Int
@@ -20,7 +28,8 @@ public struct BottomNavBar: View {
                 .frame(height: 1)
 
             HStack(spacing: 0) {
-                ForEach(Array(labels.enumerated()), id: \.offset) { i, label in
+                ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
+                    let (label, i) = tab
                     let active = i == currentIndex
                     Button(action: { onTap(i) }) {
                         Text(label)
