@@ -62,8 +62,15 @@ public struct InterfaceEchoChart: View {
         let deadzone = max(0, min(reading.deadzone, n - 1))
         let empty    = max(0, min(reading.empty,    n - 1))
 
-        func xOf(_ idx: Int)   -> CGFloat { CGFloat(idx)   * w / CGFloat(n - 1) }
-        func xOfF(_ idx: CGFloat) -> CGFloat { idx          * w / CGFloat(n - 1) }
+        // Y축 라벨용 왼쪽 여백 (X축 하단 여백과 동일한 방식)
+        let yTickProbe = context.resolve(
+            Text("3.0").font(.system(size: 10, weight: .medium)).foregroundColor(echoColLabel)
+        )
+        let leftPad = yTickProbe.measure(in: size).width + 8
+        let plotW = w - leftPad
+
+        func xOf(_ idx: Int)   -> CGFloat { leftPad + CGFloat(idx) * plotW / CGFloat(n - 1) }
+        func xOfF(_ idx: CGFloat) -> CGFloat { leftPad + idx * plotW / CGFloat(n - 1) }
         func yOf(_ v: Int) -> CGFloat {
             let clamped = min(max(Float(v) / echoAdcMax, 0), 1)
             return h - CGFloat(clamped) * h
@@ -119,12 +126,12 @@ public struct InterfaceEchoChart: View {
         let dashStyle = StrokeStyle(lineWidth: 2.5, dash: [6, 4])
         if reading.thrLightReal > 0 {
             let y = yOf(reading.thrLightReal)
-            var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
+            var p = Path(); p.move(to: CGPoint(x: leftPad, y: y)); p.addLine(to: CGPoint(x: w, y: y))
             context.stroke(p, with: .color(echoColThrLight), style: dashStyle)
         }
         if reading.thrHeavyReal > 0 {
             let y = yOf(reading.thrHeavyReal)
-            var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: w, y: y))
+            var p = Path(); p.move(to: CGPoint(x: leftPad, y: y)); p.addLine(to: CGPoint(x: w, y: y))
             context.stroke(p, with: .color(echoColThrHeavy), style: dashStyle)
         }
 
@@ -140,20 +147,46 @@ public struct InterfaceEchoChart: View {
             context.stroke(p, with: .color(echoColThrHeavy), lineWidth: 2.5)
         }
 
+        // Y-axis ticks: 1.0 / 2.0 / 3.0 + unit "V" at the top (ADC 0~4095 = 0~3.3V)
+        let vUnit = context.resolve(
+            Text("V").font(.system(size: 10, weight: .medium)).foregroundColor(echoColLabel)
+        )
+        let vSize = vUnit.measure(in: size)
+        context.draw(vUnit, at: CGPoint(x: leftPad - vSize.width - 6, y: 0), anchor: .topLeading)
+        for volt in [1, 2, 3] {
+            let raw = Int(Float(volt) / 3.3 * echoAdcMax)
+            let y = yOf(raw)
+            var guide = Path()
+            guide.move(to: CGPoint(x: leftPad, y: y))
+            guide.addLine(to: CGPoint(x: w, y: y))
+            context.stroke(guide, with: .color(echoColLabel.opacity(0.25)), lineWidth: 1)
+            let resolved = context.resolve(
+                Text("\(volt).0").font(.system(size: 10, weight: .medium)).foregroundColor(echoColLabel)
+            )
+            let measured = resolved.measure(in: size)
+            let top = min(max(0, y - measured.height / 2), h - measured.height)
+            context.draw(resolved, at: CGPoint(x: leftPad - measured.width - 6, y: top), anchor: .topLeading)
+        }
+
         // 10-step X-axis label strip (EMPTY-meters, intentionally inverted vs wave)
         let emptyM = Float(empty) * 0.01
         let totalRangeM = Float(n - 1) * 0.01
         if emptyM > 0 && totalRangeM > 0 {
+            let mUnit = context.resolve(
+                Text("m").font(.system(size: 11, weight: .medium)).foregroundColor(echoColLabel)
+            )
+            let mSize = mUnit.measure(in: size)
+            context.draw(mUnit, at: CGPoint(x: w - mSize.width, y: h + 4), anchor: .topLeading)
             for i in 0...10 {
                 let v = emptyM - (emptyM / 10.0) * Float(i)
-                let x = w * CGFloat((emptyM - v) / totalRangeM)
-                if x < 0 || x > w { continue }
+                let x = leftPad + plotW * CGFloat((emptyM - v) / totalRangeM)
+                if x < leftPad || x > w { continue }
                 let label = String(format: "%.2f", v)
                 let resolved = context.resolve(
                     Text(label).font(.system(size: 11, weight: .medium)).foregroundColor(echoColLabel)
                 )
                 let measured = resolved.measure(in: size)
-                let centeredX = max(0, min(w - measured.width, x - measured.width / 2))
+                let centeredX = max(0, min(w - mSize.width - 6 - measured.width, x - measured.width / 2))
                 context.draw(resolved, at: CGPoint(x: centeredX, y: h + 4), anchor: .topLeading)
             }
         }

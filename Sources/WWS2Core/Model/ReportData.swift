@@ -9,7 +9,7 @@ public enum ReportStage: Equatable, Sendable {
 
 /// 한 ENV130 채널에 대해 리포트 생성 시 BLE 로 수집한 스냅샷.
 /// 측정값 + 설정값은 STATUS 응답에서, 파형은 ECHO 실시간/평균 응답에서 모은다.
-public struct ReportData: Equatable, Sendable {
+public struct ReportData: Equatable, Sendable, Codable {
     public let deviceId: String
     public let label: String
     public let firmwareVersion: String
@@ -37,6 +37,10 @@ public struct ReportData: Equatable, Sendable {
     // 파형
     public let realEcho: InterfaceEchoReading?
     public let avgEcho: InterfaceEchoReading?
+    /// 사용자 입력 제목 (파일명/리스트 표시용, 비우면 label 사용)
+    public let title: String?
+    /// 점검자 의견 (리포트 화면에서 입력, 스냅샷/PDF에 포함)
+    public var comment: String?
 
     public init(
         deviceId: String, label: String, firmwareVersion: String, timestamp: String,
@@ -46,7 +50,8 @@ public struct ReportData: Equatable, Sendable {
         thrLightSet: Int = 0, thrLightMode: Int = 0,
         thrHeavySet: Int = 0, thrHeavyMode: Int = 0,
         echoAmp: Int = 0, relay: Int = 0,
-        realEcho: InterfaceEchoReading?, avgEcho: InterfaceEchoReading?
+        realEcho: InterfaceEchoReading?, avgEcho: InterfaceEchoReading?,
+        title: String? = nil, comment: String? = nil
     ) {
         self.deviceId = deviceId
         self.label = label
@@ -71,5 +76,7 @@ public struct ReportData: Equatable, Sendable {
         self.relay = relay
         self.realEcho = realEcho
         self.avgEcho = avgEcho
+        self.title = title
+        self.comment = comment
     }
 }

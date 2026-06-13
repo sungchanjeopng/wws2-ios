@@ -4,6 +4,7 @@ import SwiftUI
 import WWS2Core
 
 private let echoOrange = Color(hex: 0xFFA500)
+private let echoDzEmpty = Color(hex: 0x3182F6)
 
 // MARK: - Edit descriptor (mirrors Kotlin EchoEdit data class — EchoTabScreen.kt:257-265)
 
@@ -16,6 +17,8 @@ struct EchoEdit: Identifiable, Equatable {
     let min: Int
     let max: Int
     let step: Int
+    /// 1 = integer-only, 100 = two decimal digits (raw is value × 100).
+    var decimalScale: Int = 1
     let formatter: (Int) -> String
 
     static func == (lhs: EchoEdit, rhs: EchoEdit) -> Bool { lhs.id == rhs.id }
@@ -119,16 +122,38 @@ public struct EchoTabScreen: View {
 
 // MARK: - InterfaceEchoInfoRow (mirrors Kotlin EchoTabScreen.kt:172-220)
 //
-// Three editable cells: Thr.Light, Thr.Heavy, Echo Amp. Each opens a different
-// EchoEdit depending on the current Auto/Manual mode of that threshold (which
-// switches both the unit shown — "%" vs "V" — and the cmd/min/max/step).
+// Five editable cells: Thr.Light, Thr.Heavy, Echo Amp, Empty, Dead Zone.
+// Too wide for one screen → horizontal scroll (first three visible initially).
+
+private struct EchoRowScrollInfo: Equatable {
+    var contentMinX: CGFloat = 0
+    var contentMaxX: CGFloat = 0
+    var containerWidth: CGFloat = 0
+}
+
+private struct EchoRowScrollInfoKey: PreferenceKey {
+    static var defaultValue = EchoRowScrollInfo()
+    static func reduce(value: inout EchoRowScrollInfo, nextValue: () -> EchoRowScrollInfo) {
+        let next = nextValue()
+        if next.containerWidth != 0 {
+            value.containerWidth = next.containerWidth
+        } else {
+            value.contentMinX = next.contentMinX
+            value.contentMaxX = next.contentMaxX
+        }
+    }
+}
 
 private struct InterfaceEchoInfoRow: View {
     let ifReading: InterfaceEchoReading?
     let onEdit: (EchoEdit) -> Void
 
+    @State private var canScrollLeft = false
+    @State private var canScrollRight = false
+
     var body: some View {
-        HStack(spacing: 0) {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 20) {
             EditableEchoInfo(
                 text: thrText(label: "Thr.Light", mode: ifReading?.thrLightMode,
                               raw: ifReading?.thrLightSet),
@@ -151,7 +176,7 @@ private struct InterfaceEchoInfoRow: View {
                 text: thrText(label: "Thr.Heavy", mode: ifReading?.thrHeavyMode,
                               raw: ifReading?.thrHeavySet),
                 color: echoOrange,
-                alignment: .center
+                alignment: .leading
             ) {
                 guard let r = ifReading else { return }
                 if r.thrHeavyMode == 1 {
@@ -168,17 +193,95 @@ private struct InterfaceEchoInfoRow: View {
             EditableEchoInfo(
                 text: "Echo Amp  \(ifReading?.echoAmp.description ?? "--")",
                 color: AppColors.primary,
-                alignment: .trailing
+                alignment: .leading
             ) {
                 let cur = ifReading?.echoAmp ?? 15
                 onEdit(EchoEdit(title: "Echo Amp", cmd: 1, value: cur,
                                 min: 1, max: 50, step: 1,
                                 formatter: { v in "\(v)" }))
             }
+
+            EditableEchoInfo(
+                text: "Empty  " + (ifReading.map { String(format: "%.2fm", Double($0.empty) * 0.01) } ?? "--"),
+                color: echoDzEmpty,
+                alignment: .leading
+            ) {
+                guard let r = ifReading else { return }
+                onEdit(EchoEdit(title: "Empty", cmd: 12, value: r.empty,
+                                min: 1, max: 1000, step: 1, decimalScale: 100,
+                                formatter: { v in String(format: "%.2f m", Double(v) / 100.0) }))
+            }
+
+            EditableEchoInfo(
+                text: "Dead Zone  " + (ifReading.map { String(format: "%.2fm", Double($0.deadzone) * 0.01) } ?? "--"),
+                color: echoDzEmpty,
+                alignment: .leading
+            ) {
+                guard let r = ifReading else { return }
+                onEdit(EchoEdit(title: "Dead Zone", cmd: 13, value: r.deadzone,
+                                min: 35, max: 1000, step: 1, decimalScale: 100,
+                                formatter: { v in String(format: "%.2f m", Double(v) / 100.0) }))
+            }
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 4)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: EchoRowScrollInfoKey.self,
+                        value: EchoRowScrollInfo(
+                            contentMinX: geo.frame(in: .named("echoInfoRow")).minX,
+                            contentMaxX: geo.frame(in: .named("echoInfoRow")).maxX,
+                            containerWidth: 0
+                        )
+                    )
+                }
+            )
         }
-        .lineLimit(1)
-        .minimumScaleFactor(0.75)
-        .padding(.horizontal, 4)
+        .coordinateSpace(name: "echoInfoRow")
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: EchoRowScrollInfoKey.self,
+                    value: EchoRowScrollInfo(contentMinX: 0, contentMaxX: 0, containerWidth: geo.size.width)
+                )
+            }
+        )
+        .onPreferenceChange(EchoRowScrollInfoKey.self) { info in
+            canScrollLeft = info.contentMinX < -2
+            canScrollRight = info.contentMaxX > info.containerWidth + 2
+        }
+        .overlay(alignment: .leading) {
+            if canScrollLeft { edgeFade(leading: true) }
+        }
+        .overlay(alignment: .trailing) {
+            if canScrollRight { edgeFade(leading: false) }
+        }
+    }
+
+    private func edgeFade(leading: Bool) -> some View {
+        HStack(spacing: 0) {
+            if leading {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppColors.grayLabel)
+                    .frame(maxHeight: .infinity)
+                    .background(AppColors.background)
+                LinearGradient(colors: [AppColors.background, AppColors.background.opacity(0)],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 24)
+            } else {
+                LinearGradient(colors: [AppColors.background.opacity(0), AppColors.background],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 24)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppColors.grayLabel)
+                    .frame(maxHeight: .infinity)
+                    .background(AppColors.background)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     private func thrText(label: String, mode: Int?, raw: Int?) -> String {
@@ -235,7 +338,8 @@ struct EchoEditSheet: View {
     let onCancel: () -> Void
 
     @State private var stepperValue: Int
-    @State private var text: String
+    @State private var intText: String
+    @State private var fracText: String
     @State private var sendingState: EchoSendingState = .idle
 
     init(config: EchoEdit, onApply: @escaping (Int) async -> Bool, onCancel: @escaping () -> Void) {
@@ -244,18 +348,42 @@ struct EchoEditSheet: View {
         self.onCancel = onCancel
         let clamped = Swift.min(Swift.max(config.value, config.min), config.max)
         _stepperValue = State(initialValue: clamped)
-        _text         = State(initialValue: "\(clamped)")
+        _intText      = State(initialValue: Self.integerText(raw: clamped, scale: config.decimalScale))
+        _fracText     = State(initialValue: Self.fractionText(raw: clamped, scale: config.decimalScale))
+    }
+
+    private static func integerText(raw: Int, scale: Int) -> String {
+        if scale <= 1 { return "\(raw)" }
+        let absRaw = abs(raw)
+        let sign = raw < 0 ? "-" : ""
+        return sign + "\(absRaw / scale)"
+    }
+
+    private static func fractionText(raw: Int, scale: Int) -> String {
+        if scale <= 1 { return "" }
+        return String(format: "%02d", abs(raw) % scale)
+    }
+
+    private func parseRaw() -> Int? {
+        if config.decimalScale <= 1 { return Int(intText) }
+        guard let intPart  = Int(intText) else { return nil }
+        guard let fracPart = Int(fracText) else { return nil }
+        guard fracPart >= 0 && fracPart < config.decimalScale else { return nil }
+        let negative = intText.trimmingCharacters(in: .whitespaces).hasPrefix("-")
+        let rawAbs = abs(intPart) * config.decimalScale + fracPart
+        return negative ? -rawAbs : rawAbs
     }
 
     private var parsedValue: Int? {
-        guard let n = Int(text) else { return nil }
+        guard let n = parseRaw() else { return nil }
         return (n >= config.min && n <= config.max) ? n : nil
     }
 
     private func setValue(_ newValue: Int) {
         let clamped = Swift.min(Swift.max(newValue, config.min), config.max)
         stepperValue = clamped
-        text = "\(clamped)"
+        intText  = Self.integerText(raw: clamped, scale: config.decimalScale)
+        fracText = Self.fractionText(raw: clamped, scale: config.decimalScale)
     }
 
     var body: some View {
@@ -297,25 +425,69 @@ struct EchoEditSheet: View {
             }
             .padding(.horizontal, 20)
 
-            VStack(alignment: .leading, spacing: 4) {
-                TextField("Value", text: $text)
-                    .keyboardType(.numbersAndPunctuation)
-                    .font(.system(size: 20))
-                    .padding(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(parsedValue == nil ? AppColors.error : AppColors.weakText,
-                                    lineWidth: 1)
-                    )
-                    .onChange(of: text) { newValue in
-                        let allowMinus = config.min < 0
-                        text = filterIntegerInput(newValue, allowMinus: allowMinus)
-                    }
-                Text("Range \(config.min) ~ \(config.max) / \(parsedValue.map(config.formatter) ?? "Invalid")")
+            if config.decimalScale > 1 {
+                HStack(spacing: 6) {
+                    TextField("", text: $intText)
+                        .keyboardType(.numbersAndPunctuation)
+                        .multilineTextAlignment(.trailing)
+                        .font(.system(size: 20))
+                        .frame(width: 100)
+                        .padding(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(parsedValue == nil ? AppColors.error : AppColors.weakText,
+                                        lineWidth: 1)
+                        )
+                        .onChange(of: intText) { newValue in
+                            let allowMinus = config.min < 0
+                            intText = filterIntegerInput(newValue, allowMinus: allowMinus)
+                        }
+
+                    Text(".")
+                        .font(.system(size: 24, weight: .bold))
+
+                    TextField("", text: $fracText)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.leading)
+                        .font(.system(size: 20))
+                        .frame(width: 80)
+                        .padding(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(parsedValue == nil ? AppColors.error : AppColors.weakText,
+                                        lineWidth: 1)
+                        )
+                        .onChange(of: fracText) { newValue in
+                            let filtered = newValue.filter { $0.isNumber }
+                            fracText = String(filtered.prefix(2))
+                        }
+                }
+                .padding(.horizontal, 20)
+
+                Text("Range \(config.formatter(config.min)) ~ \(config.formatter(config.max))")
                     .font(.system(size: 12))
                     .foregroundStyle(AppColors.grayLabel)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Value", text: $intText)
+                        .keyboardType(.numbersAndPunctuation)
+                        .font(.system(size: 20))
+                        .padding(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(parsedValue == nil ? AppColors.error : AppColors.weakText,
+                                        lineWidth: 1)
+                        )
+                        .onChange(of: intText) { newValue in
+                            let allowMinus = config.min < 0
+                            intText = filterIntegerInput(newValue, allowMinus: allowMinus)
+                        }
+                    Text("Range \(config.min) ~ \(config.max) / \(parsedValue.map(config.formatter) ?? "Invalid")")
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppColors.grayLabel)
+                }
+                .padding(.horizontal, 20)
             }
-            .padding(.horizontal, 20)
 
             Spacer()
 

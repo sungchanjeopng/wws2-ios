@@ -21,7 +21,7 @@
 
 import Foundation
 
-public struct InterfaceEchoReading: Equatable, Hashable, Sendable {
+public struct InterfaceEchoReading: Equatable, Hashable, Sendable, Codable {
     public let lightLevel: Double
     public let heavyLevel: Double
     public let deadzone: Int

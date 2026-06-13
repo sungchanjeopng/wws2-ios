@@ -15,6 +15,7 @@ import Foundation
 import Combine
 import SwiftUI
 import UIKit
+import PDFKit
 import CoreBluetooth
 import WWS2Core
 import WWS2BLE
@@ -922,8 +923,9 @@ public final class AppViewModel: ObservableObject {
         case 8:    return "8:\(state.set4mA)"
         case 9:    return "9:\(state.set20mA)"
         case 11:   return "11:\(state.damping)"
-        case 12:   return "12:\(state.emptyDistance)"
-        case 13:   return "13:\(state.deadZone)"
+        // Echo 탭은 Status가 아닌 파형만 폴링하므로 파형 헤더 값도 함께 감시
+        case 12:   return "12:\(ifReading?.empty ?? -1):\(state.emptyDistance)"
+        case 13:   return "13:\(ifReading?.deadzone ?? -1):\(state.deadZone)"
         default:   return "unknown"
         }
     }
@@ -1117,7 +1119,7 @@ public final class AppViewModel: ObservableObject {
         return state.deviceType == .interface_ ? "ENV130_A02" : "ENV230_A01"
     }
 
-    public func activateAndDownload(_ deviceId: String) {
+    public func activateAndDownload(_ deviceId: String, title: String = "") {
         guard let connected = state.connectedDevices.first(where: { $0.id == deviceId }),
               let gatt = gattClients[deviceId]
         else {
@@ -1138,13 +1140,16 @@ public final class AppViewModel: ObservableObject {
 
         let useCase = ExportCsvUseCase()
         let stamp = useCase.formatDateStamp(Date())
-        let filename = "\(connected.label)_\(stamp).csv"
+        let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "[\\\\/:*?\"<>|]", with: "_", options: .regularExpression)
+        let label = trimmedTitle.isEmpty ? connected.label : trimmedTitle
+        let filename = "\(label)_\(stamp).csv"
         let placeholder = DataFileItem(
             name: filename,
             recordCount: 0,
             rangeLabel: "--",
             sizeBytes: 0,
-            targetDevice: connected.label,
+            targetDevice: label,
             chartRecords: [],
             allRecords: []
         )
@@ -1384,7 +1389,7 @@ public final class AppViewModel: ObservableObject {
 
     /// 선택한 채널에 대해 리포트를 생성한다.
     /// 캐시가 아니라 BLE로 직접 STATUS(측정+설정) → ECHO 실시간 → ECHO 평균을 수집한다.
-    public func selectReportDevice(_ id: String) {
+    public func selectReportDevice(_ id: String, title: String = "") {
         state.reportTargetId = id
         state.reportStage = .collecting
         state.reportData = nil
@@ -1447,10 +1452,12 @@ public final class AppViewModel: ObservableObject {
                 echoAmp:      realEcho?.echoAmp      ?? avgEcho?.echoAmp      ?? 0,
                 relay:        state.relay,
                 realEcho: realEcho,
-                avgEcho: avgEcho
+                avgEcho: avgEcho,
+                title: title.trimmingCharacters(in: .whitespaces)
             )
             state.reportData = data
             state.reportStage = .done
+            saveReportSnapshot(data)
         }
     }
 
@@ -1493,13 +1500,228 @@ public final class AppViewModel: ObservableObject {
         }
         UIGraphicsEndPDFContext()
 
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("WESSWARE_reports")
+        // Documents/exports = Files 앱(WESSWARE 폴더)에서 보이는 영구 저장 위치
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("exports")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let safe = data.label.replacingOccurrences(of: " ", with: "_")
-        let stamp = Int(Date().timeIntervalSince1970)
-        let url = dir.appendingPathComponent("Report_\(safe)_\(stamp).pdf")
+        let pdfName = (data.title?.isEmpty == false) ? data.title! : data.label
+        let safe = pdfName.replacingOccurrences(of: "[\\\\/:*?\"<>| ]", with: "_", options: .regularExpression)
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd_HHmmss"
+        let url = dir.appendingPathComponent("Report_\(safe)_\(df.string(from: Date())).pdf")
         pdfData.write(to: url, atomically: true)
         return url
+    }
+
+    /// 리포트를 JPG 이미지 한 장으로 저장해 공유용 URL 반환.
+    /// (PDF 페이지들을 PDFKit으로 렌더해 세로로 이어 붙임)
+    public func shareReportImage() -> URL? {
+        guard let pdfUrl = shareReportHtml(), let doc = PDFDocument(url: pdfUrl), doc.pageCount > 0 else { return nil }
+        let scale: CGFloat = 2
+        var pages: [UIImage] = []
+        for i in 0..<doc.pageCount {
+            guard let page = doc.page(at: i) else { continue }
+            let bounds = page.bounds(for: .mediaBox)
+            let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+            pages.append(page.thumbnail(of: size, for: .mediaBox))
+        }
+        guard let first = pages.first else { return nil }
+        let totalSize = CGSize(width: first.size.width,
+                               height: pages.reduce(0) { $0 + $1.size.height })
+        let renderer = UIGraphicsImageRenderer(size: totalSize)
+        let combined = renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: totalSize))
+            var y: CGFloat = 0
+            for img in pages {
+                img.draw(at: CGPoint(x: 0, y: y))
+                y += img.size.height
+            }
+        }
+        guard let jpg = combined.jpegData(compressionQuality: 0.9) else { return nil }
+        let url = pdfUrl.deletingPathExtension().appendingPathExtension("jpg")
+        try? jpg.write(to: url, options: .atomic)
+        return url
+    }
+
+    /// 리포트를 CSV로 저장해 공유용 URL 반환. 파형은 raw 데이터(Index,Real,Avg)로 포함.
+    public func shareReportCsv() -> URL? {
+        guard let data = state.reportData else { return nil }
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("exports")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let name = (data.title?.isEmpty == false) ? data.title! : data.label
+        let safe = name.replacingOccurrences(of: "[\\\\/:*?\"<>| ]", with: "_", options: .regularExpression)
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd_HHmmss"
+        let url = dir.appendingPathComponent("Report_\(safe)_\(df.string(from: Date())).csv")
+        // BOM — 엑셀에서 한글 깨짐 방지
+        let csv = "\u{FEFF}" + buildReportCsv(data)
+        try? csv.data(using: .utf8)?.write(to: url, options: .atomic)
+        return url
+    }
+
+    private func buildReportCsv(_ data: ReportData) -> String {
+        func q(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        var out = ""
+        out += "Title,\(q((data.title?.isEmpty == false) ? data.title! : data.label))\n"
+        out += "Device,\(q(data.label))\n"
+        out += "Model,ENV130\n"
+        out += "Timestamp,\(q(data.timestamp))\n\n"
+        out += "[Measurement]\n"
+        out += "Light Level (m),\(String(format: "%.2f", data.lightLevel))\n"
+        out += "Heavy Level (m),\(String(format: "%.2f", data.heavyLevel))\n"
+        out += "Temperature (C),\(String(format: "%.1f", data.temperatureC))\n"
+        out += "Current (mA),\(String(format: "%.2f", data.currentMA))\n\n"
+        out += "[Parameter]\n"
+        out += "Echo Amp,\(data.echoAmp)\n"
+        out += "Frequency (kHz),\(String(format: "%.0f", data.freqMHz * 1000))\n"
+        let thrL = data.thrLightMode == 1
+            ? String(format: "%.1f V", Double(data.thrLightSet) / 10.0) : "\(data.thrLightSet) %"
+        let thrH = data.thrHeavyMode == 1
+            ? String(format: "%.1f V", Double(data.thrHeavySet) / 10.0) : "\(data.thrHeavySet) %"
+        out += "Thr.Light,\(q(thrL))\n"
+        out += "Thr.Heavy,\(q(thrH))\n"
+        out += "Offset (m),\(String(format: "%.2f", data.offset))\n"
+        out += "Empty (m),\(String(format: "%.2f", data.emptyDistance))\n"
+        out += "Dead Zone (m),\(String(format: "%.2f", data.deadZone))\n"
+        out += "Damping,\(data.damping)\n"
+        out += "Set 4mA (m),\(String(format: "%.2f", data.set4mA))\n"
+        out += "Set 20mA (m),\(String(format: "%.2f", data.set20mA))\n\n"
+        out += "[Comment]\n"
+        out += q(data.comment ?? "") + "\n\n"
+        out += "[Waveform]\n"
+        out += "Index,Real,Avg\n"
+        let real = data.realEcho?.wave ?? []
+        let avg = data.avgEcho?.wave ?? []
+        for i in 0..<max(real.count, avg.count) {
+            let r = i < real.count ? "\(real[i])" : ""
+            let a = i < avg.count ? "\(avg[i])" : ""
+            out += "\(i),\(r),\(a)\n"
+        }
+        return out
+    }
+
+    /// 리포트를 Word가 열 수 있는 MHTML(.doc)로 저장해 공유용 URL 반환.
+    /// HTML + 파형 PNG 2장을 multipart/related 한 파일에 포장 — mirrors Kotlin ReportWordExporter.
+    public func shareReportWord() -> URL? {
+        guard let data = state.reportData else { return nil }
+        // Documents/exports = Files 앱(WESSWARE 폴더)에서 보이는 영구 저장 위치
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("exports")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let name = (data.title?.isEmpty == false) ? data.title! : data.label
+        let safe = name.replacingOccurrences(of: "[\\\\/:*?\"<>| ]", with: "_", options: .regularExpression)
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd_HHmmss"
+        let url = dir.appendingPathComponent("Report_\(safe)_\(df.string(from: Date())).doc")
+        guard let bytes = buildReportMhtml(data).data(using: .utf8) else { return nil }
+        try? bytes.write(to: url, options: .atomic)
+        return url
+    }
+
+    private func buildReportMhtml(_ data: ReportData) -> String {
+        let boundary = "----=_NextPart_WWS2_REPORT"
+        let (realB64, avgB64) = ReportHtmlExporter.waveImagesBase64(data)
+        let html = ReportHtmlExporter.buildHtml(data, realSrc: "wave_real.png", avgSrc: "wave_avg.png", forWord: true)
+        let htmlB64 = Data(html.utf8).base64EncodedString(
+            options: [.lineLength76Characters, .endLineWithCarriageReturn, .endLineWithLineFeed])
+
+        func wrap76(_ s: String) -> String {
+            var out = ""
+            var idx = s.startIndex
+            while idx < s.endIndex {
+                let end = s.index(idx, offsetBy: 76, limitedBy: s.endIndex) ?? s.endIndex
+                out += s[idx..<end]
+                out += "\r\n"
+                idx = end
+            }
+            return out
+        }
+
+        var m = ""
+        m += "MIME-Version: 1.0\r\n"
+        m += "Content-Type: multipart/related; boundary=\"\(boundary)\"; type=\"text/html\"\r\n\r\n"
+        m += "--\(boundary)\r\n"
+        m += "Content-Type: text/html; charset=\"utf-8\"\r\n"
+        m += "Content-Transfer-Encoding: base64\r\n"
+        m += "Content-Location: report.html\r\n\r\n"
+        m += htmlB64 + "\r\n\r\n"
+        m += "--\(boundary)\r\n"
+        m += "Content-Type: image/png\r\n"
+        m += "Content-Transfer-Encoding: base64\r\n"
+        m += "Content-Location: wave_real.png\r\n\r\n"
+        m += wrap76(realB64) + "\r\n"
+        m += "--\(boundary)\r\n"
+        m += "Content-Type: image/png\r\n"
+        m += "Content-Transfer-Encoding: base64\r\n"
+        m += "Content-Location: wave_avg.png\r\n\r\n"
+        m += wrap76(avgB64) + "\r\n"
+        m += "--\(boundary)--\r\n"
+        return m
+    }
+
+    // ── Report snapshot (ReportResult 화면 다시 열기) — mirrors Kotlin ReportSnapshotStore ──
+
+    public func savedReportsDir() -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("report_snapshots")
+    }
+
+    // 현재 표시 중인 리포트의 스냅샷 파일 (comment 수정 시 갱신 대상)
+    private var currentReportSnapshotURL: URL? = nil
+
+    private func saveReportSnapshot(_ data: ReportData) {
+        let dir = savedReportsDir()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let name = (data.title?.isEmpty == false) ? data.title! : data.label
+        let safe = name.replacingOccurrences(of: "[\\\\/:*?\"<>| ]", with: "_", options: .regularExpression)
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd_HHmmss"
+        let url = dir.appendingPathComponent("Report_\(safe)_\(df.string(from: Date())).json")
+        if let json = try? JSONEncoder().encode(data) {
+            try? json.write(to: url, options: .atomic)
+            currentReportSnapshotURL = url
+        }
+    }
+
+    /// 리포트 화면에서 의견 입력/수정 — state + 스냅샷 파일 동시 갱신.
+    public func updateReportComment(_ comment: String) {
+        guard var data = state.reportData else { return }
+        data.comment = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.reportData = data
+        if let url = currentReportSnapshotURL, let json = try? JSONEncoder().encode(data) {
+            try? json.write(to: url, options: .atomic)
+        }
+    }
+
+    public func listSavedReports() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: savedReportsDir(),
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        return files.filter { $0.pathExtension.lowercased() == "json" }
+            .sorted { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return da > db
+            }
+    }
+
+    public func openReportSnapshot(_ url: URL) {
+        guard let json = try? Data(contentsOf: url),
+              let data = try? JSONDecoder().decode(ReportData.self, from: json) else {
+            state.reportError = "Failed to open saved report"
+            state.reportStage = .error
+            return
+        }
+        currentReportSnapshotURL = url
+        state.reportData = data
+        state.reportStage = .done
+    }
+
+    public func deleteSavedReport(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
     }
 
     private func loadSavedDataFileItems() -> [DataFileItem] {

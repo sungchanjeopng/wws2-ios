@@ -36,6 +36,8 @@ public struct DataDownloadScreen: View {
 private struct ListStage: View {
     @ObservedObject var vm: AppViewModel
     let onPickCsv: () -> Void
+    @State private var titlePromptFor: String? = nil
+    @State private var titleText = ""
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -77,7 +79,7 @@ private struct ListStage: View {
                                             .font(.system(size: 13, weight: .semibold))
                                             .foregroundStyle(AppColors.darkText)
                                     }
-                                    Button(action: { vm.activateAndDownload(dev.id) }) {
+                                    Button(action: { titleText = ""; titlePromptFor = dev.id }) {
                                         Text("Download")
                                             .font(.system(size: 15, weight: .bold))
                                             .foregroundStyle(.white)
@@ -125,6 +127,21 @@ private struct ListStage: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+        }
+        .alert("Download Title", isPresented: Binding(
+            get: { titlePromptFor != nil },
+            set: { if !$0 { titlePromptFor = nil } }
+        )) {
+            TextField("Title (optional)", text: $titleText)
+            Button("Cancel", role: .cancel) { titlePromptFor = nil }
+            Button("Download") {
+                if let id = titlePromptFor {
+                    titlePromptFor = nil
+                    vm.activateAndDownload(id, title: titleText)
+                }
+            }
+        } message: {
+            Text("Leave empty to use the device name")
         }
     }
 }

@@ -30,6 +30,8 @@ targets:
         NSLocationWhenInUseUsageDescription: WESSWARE 장비 검색/연결 기능에 위치 권한이 필요할 수 있습니다.
         UIBackgroundModes:
           - bluetooth-central
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

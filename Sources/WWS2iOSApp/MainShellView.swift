@@ -105,7 +105,10 @@ public struct MainShellView: View {
                     onSave: presentCsvExporter
                 )
             case "report":
-                ReportScreen(vm: vm, onShare: presentReportShareSheet)
+                ReportScreen(vm: vm, onShare: presentReportShareSheet,
+                             onShareWord: presentReportWordShareSheet,
+                             onShareImage: presentReportImageShareSheet,
+                             onShareCsv: presentReportCsvShareSheet)
             default:         MenuTabScreen(vm: vm)
             }
         } else {
@@ -181,6 +184,30 @@ public struct MainShellView: View {
 
     private func presentReportShareSheet() {
         guard let url = vm.shareReportHtml() else {
+            fileImportError = FileImportError(message: "No report available to share.")
+            return
+        }
+        sharePayload = SharePayload(url: url)
+    }
+
+    private func presentReportWordShareSheet() {
+        guard let url = vm.shareReportWord() else {
+            fileImportError = FileImportError(message: "No report available to share.")
+            return
+        }
+        sharePayload = SharePayload(url: url)
+    }
+
+    private func presentReportImageShareSheet() {
+        guard let url = vm.shareReportImage() else {
+            fileImportError = FileImportError(message: "No report available to share.")
+            return
+        }
+        sharePayload = SharePayload(url: url)
+    }
+
+    private func presentReportCsvShareSheet() {
+        guard let url = vm.shareReportCsv() else {
             fileImportError = FileImportError(message: "No report available to share.")
             return
         }
