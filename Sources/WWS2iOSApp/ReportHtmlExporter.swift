@@ -261,7 +261,7 @@ enum ReportHtmlExporter {
           .badge { display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 12px; border-radius: 999px; }
           .badge.real { color: #3182F6; background: rgba(49,130,246,0.12); }
           .badge.avg { color: #FF8C00; background: rgba(255,140,0,0.12); }
-          img.wave { width: 100%; border: 1px solid #E8EBED; border-radius: 12px; margin-top: 8px; }
+          img.wave { display: block; width: 100%; border: 1px solid #E8EBED; border-radius: 12px; margin-top: 4px; }
           .comment { border: 1.5px solid #C9CFD6; min-height: 90px; padding: 14px; font-size: 14px; font-weight: 600; color: #191F28; white-space: pre-wrap; }
           @media print { body { background: #FFF; padding: 0; } .sheet { box-shadow: none; } }
         </style>
