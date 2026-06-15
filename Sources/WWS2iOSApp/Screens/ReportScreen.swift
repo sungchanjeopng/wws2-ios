@@ -214,8 +214,10 @@ private struct ReportResult: View {
                     SectionLabel(title: "Measurement", accent: lightBlue)
                     Spacer().frame(height: 10)
                     GridTable2(rows: measurementRows)
-                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
-                            .onEnded { _ in copyAsImage(GridTable2(rows: measurementRows)) })
+                        .contextMenu {
+                            Button { copyAsImage(GridTable2(rows: measurementRows)) }
+                                label: { Label("Copy as Image", systemImage: "doc.on.doc") }
+                        }
                     Spacer().frame(height: 22)
 
                     let thrLightStr = data.thrLightMode == 1
@@ -239,19 +241,25 @@ private struct ReportResult: View {
                     SectionLabel(title: "Parameter", accent: lightBlue)
                     Spacer().frame(height: 10)
                     GridTable4(rows: parameterRows)
-                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
-                            .onEnded { _ in copyAsImage(GridTable4(rows: parameterRows)) })
+                        .contextMenu {
+                            Button { copyAsImage(GridTable4(rows: parameterRows)) }
+                                label: { Label("Copy as Image", systemImage: "doc.on.doc") }
+                        }
                     Spacer().frame(height: 22)
 
                     SectionLabel(title: "Echo", accent: lightBlue)
                     Spacer().frame(height: 14)
                     WaveBlock(tag: "Real", accent: lightBlue, reading: data.realEcho)
-                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
-                            .onEnded { _ in copyWaveImage(data.realEcho) })
+                        .contextMenu {
+                            Button { copyWaveImage(data.realEcho) }
+                                label: { Label("Copy as Image", systemImage: "doc.on.doc") }
+                        }
                     Spacer().frame(height: 14)
                     WaveBlock(tag: "Average", accent: heavyOrange, reading: data.avgEcho)
-                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
-                            .onEnded { _ in copyWaveImage(data.avgEcho) })
+                        .contextMenu {
+                            Button { copyWaveImage(data.avgEcho) }
+                                label: { Label("Copy as Image", systemImage: "doc.on.doc") }
+                        }
                     Spacer().frame(height: 22)
 
                     SectionLabel(title: "Comment", accent: lightBlue)
