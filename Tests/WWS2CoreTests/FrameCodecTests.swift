@@ -54,8 +54,8 @@ final class FrameCodecTests: XCTestCase {
         XCTAssertNil(FrameCodec.parseFrame([0x02, 0x00, 0x00, 0x00]))
     }
 
-    func testParsePairingResponseSuccess() throws {
-        // Build a valid response: result=0x0000
+    func testParsePairingResponseSuccessLegacyNoVersion() throws {
+        // Legacy 7-byte success response: result=0x0000, no version bytes.
         let payload: [UInt8] = [0x02, 0x00, 0xF0, 0x00, 0x00]
         let crc = Crc.crc16Modbus(payload)
         let frame = payload + [UInt8(crc & 0xFF), UInt8((crc >> 8) & 0xFF)]
@@ -63,7 +63,21 @@ final class FrameCodecTests: XCTestCase {
         guard case .success(let info) = result else {
             return XCTFail("expected .success, got \(String(describing: result))")
         }
-        XCTAssertEqual(info.fwVersion.major, 0)
+        // Old firmware reports no version.
+        XCTAssertNil(info.fwVersion)
+    }
+
+    func testParsePairingResponseSuccessWithVersion() throws {
+        // v1.1.2+ 10-byte success response: result=0x0000 + version 1.1.2.
+        let payload: [UInt8] = [0x02, 0x00, 0xF0, 0x00, 0x00, 0x01, 0x01, 0x02]
+        let crc = Crc.crc16Modbus(payload)
+        let frame = payload + [UInt8(crc & 0xFF), UInt8((crc >> 8) & 0xFF)]
+        let result = FrameCodec.parsePairingResponse(frame)
+        guard case .success(let info) = result else {
+            return XCTFail("expected .success, got \(String(describing: result))")
+        }
+        XCTAssertEqual(info.fwVersion, FwVersion(major: 1, minor: 1, patch: 2))
+        XCTAssertEqual(info.fwVersion?.description, "v1.1.2")
     }
 
     func testPairingResponseSuccessAndPinFailed() {
@@ -71,7 +85,7 @@ final class FrameCodecTests: XCTestCase {
         let fail = FrameCodec.buildFrame(len: Int(Command.cmdDeviceInfo), data: [0x00, 0x01])
         XCTAssertEqual(
             FrameCodec.parsePairingResponse(ok),
-            PairingResult.success(DeviceInfo(siteNameHi: "?", siteNameLo: 0, fwVersion: FwVersion(major: 0, minor: 0, patch: 0)))
+            PairingResult.success(DeviceInfo(siteNameHi: "?", siteNameLo: 0, fwVersion: nil))
         )
         XCTAssertEqual(FrameCodec.parsePairingResponse(fail), PairingResult.pinFailed)
     }
@@ -79,7 +93,11 @@ final class FrameCodecTests: XCTestCase {
     func testPairingResponseCanBeParsedAfterFrameExtraction() {
         XCTAssertEqual(
             FrameCodec.parsePairingResponse(cmd: Command.cmdDeviceInfo, data: [0x00, 0x00]),
-            PairingResult.success(DeviceInfo(siteNameHi: "?", siteNameLo: 0, fwVersion: FwVersion(major: 0, minor: 0, patch: 0)))
+            PairingResult.success(DeviceInfo(siteNameHi: "?", siteNameLo: 0, fwVersion: nil))
+        )
+        XCTAssertEqual(
+            FrameCodec.parsePairingResponse(cmd: Command.cmdDeviceInfo, data: [0x00, 0x00, 0x01, 0x01, 0x02]),
+            PairingResult.success(DeviceInfo(siteNameHi: "?", siteNameLo: 0, fwVersion: FwVersion(major: 1, minor: 1, patch: 2)))
         )
         XCTAssertEqual(
             FrameCodec.parsePairingResponse(cmd: Command.cmdDeviceInfo, data: [0x00, 0x01]),

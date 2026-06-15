@@ -32,11 +32,15 @@ public enum FrameCodec {
         let cmd = (UInt16(frame[1]) << 8) | UInt16(frame[2])
         guard cmd == Command.cmdDeviceInfo else { return nil }
 
-        let crcExpected = Crc.crc16Modbus(Array(frame[0..<5]))
-        let crcReceived = UInt16(frame[5]) | (UInt16(frame[6]) << 8)
+        // CRC is the trailing 2 bytes over everything before it, so this copes
+        // with both the legacy 7-byte response and the 10-byte response that
+        // carries firmware version (v1.1.2+).
+        let payloadEnd = frame.count - 2
+        let crcExpected = Crc.crc16Modbus(Array(frame[0..<payloadEnd]))
+        let crcReceived = UInt16(frame[payloadEnd]) | (UInt16(frame[payloadEnd + 1]) << 8)
         guard crcExpected == crcReceived else { return nil }
 
-        return parsePairingResponse(cmd: cmd, data: Array(frame[3..<5]))
+        return parsePairingResponse(cmd: cmd, data: Array(frame[3..<payloadEnd]))
     }
 
     public static func parsePairingResponse(cmd: UInt16, data: [UInt8]) -> PairingResult? {
@@ -44,15 +48,15 @@ public enum FrameCodec {
         guard data.count >= 2 else { return nil }
 
         let result = (UInt16(data[0]) << 8) | UInt16(data[1])
-        if result == 0x0000 {
-            return .success(DeviceInfo(
-                siteNameHi: "?",
-                siteNameLo: 0,
-                fwVersion: FwVersion(major: 0, minor: 0, patch: 0)
-            ))
-        } else {
-            return .pinFailed
-        }
+        guard result == 0x0000 else { return .pinFailed }
+
+        // Firmware version (major, minor, patch) trails the result word from
+        // v1.1.2 on. When absent, fwVersion stays nil and the device is treated
+        // as v1.1.1 or older.
+        let fwVersion: FwVersion? = data.count >= 5
+            ? FwVersion(major: Int(data[2]), minor: Int(data[3]), patch: Int(data[4]))
+            : nil
+        return .success(DeviceInfo(siteNameHi: "?", siteNameLo: 0, fwVersion: fwVersion))
     }
 
     public static func buildFrame(len: Int, data: [UInt8] = []) -> [UInt8] {

@@ -29,14 +29,17 @@ public struct DeviceInfo: Equatable, Hashable, Sendable {
     public let siteNameLo: Int
     public let ch2SiteNameHi: Character
     public let ch2SiteNameLo: Int
-    public let fwVersion: FwVersion
+    /// Firmware version reported in the pairing response. `nil` when the
+    /// device did not include version bytes — i.e. firmware older than v1.1.2,
+    /// where BLE version reporting was introduced.
+    public let fwVersion: FwVersion?
 
     public init(
         siteNameHi: Character,
         siteNameLo: Int,
         ch2SiteNameHi: Character = "\u{0000}",
         ch2SiteNameLo: Int = 0,
-        fwVersion: FwVersion
+        fwVersion: FwVersion?
     ) {
         self.siteNameHi = siteNameHi
         self.siteNameLo = siteNameLo

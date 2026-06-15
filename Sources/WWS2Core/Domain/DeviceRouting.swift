@@ -219,7 +219,13 @@ public enum DeviceRouting {
         repo: DeviceRepository
     ) -> String {
         if let info {
-            return info.fwVersion.description
+            // Paired successfully. If the firmware reported a version, use it;
+            // otherwise it predates BLE version reporting (added in v1.1.2).
+            // In that case show nothing rather than a guessed value.
+            if let fw = info.fwVersion {
+                return fw.description
+            }
+            return ""
         }
         if let scanned, !scanned.fwVersion.isEmpty {
             return scanned.fwVersion
