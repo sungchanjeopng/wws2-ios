@@ -46,19 +46,6 @@ public struct InterfaceTrendChart: View {
                     }
                 }
 
-                if scaleX > 1.01 || scaleY > 1.01 {
-                    Button(action: resetZoom) {
-                        Text(String(format: "%.1fx Reset", Double(max(scaleX, scaleY))))
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(AppColors.primary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(AppColors.white.opacity(0.88))
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(8)
-                }
             }
         }
         .padding(.leading, 2)
