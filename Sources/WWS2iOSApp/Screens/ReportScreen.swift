@@ -214,7 +214,8 @@ private struct ReportResult: View {
                     SectionLabel(title: "Measurement", accent: lightBlue)
                     Spacer().frame(height: 10)
                     GridTable2(rows: measurementRows)
-                        .onLongPressGesture { copyAsImage(GridTable2(rows: measurementRows)) }
+                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
+                            .onEnded { _ in copyAsImage(GridTable2(rows: measurementRows)) })
                     Spacer().frame(height: 22)
 
                     let thrLightStr = data.thrLightMode == 1
@@ -238,16 +239,19 @@ private struct ReportResult: View {
                     SectionLabel(title: "Parameter", accent: lightBlue)
                     Spacer().frame(height: 10)
                     GridTable4(rows: parameterRows)
-                        .onLongPressGesture { copyAsImage(GridTable4(rows: parameterRows)) }
+                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
+                            .onEnded { _ in copyAsImage(GridTable4(rows: parameterRows)) })
                     Spacer().frame(height: 22)
 
                     SectionLabel(title: "Echo", accent: lightBlue)
                     Spacer().frame(height: 14)
                     WaveBlock(tag: "Real", accent: lightBlue, reading: data.realEcho)
-                        .onLongPressGesture { copyWaveImage(data.realEcho) }
+                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
+                            .onEnded { _ in copyWaveImage(data.realEcho) })
                     Spacer().frame(height: 14)
                     WaveBlock(tag: "Average", accent: heavyOrange, reading: data.avgEcho)
-                        .onLongPressGesture { copyWaveImage(data.avgEcho) }
+                        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5)
+                            .onEnded { _ in copyWaveImage(data.avgEcho) })
                     Spacer().frame(height: 22)
 
                     SectionLabel(title: "Comment", accent: lightBlue)
