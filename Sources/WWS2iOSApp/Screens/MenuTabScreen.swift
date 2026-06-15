@@ -8,6 +8,10 @@ public struct MenuTabScreen: View {
 
     public var body: some View {
         let isInterface = vm.state.deviceType == .interface_
+        // Firmware version of the active device. Blank for pre-v1.1.2 firmware
+        // (which does not report a version) or when nothing is connected.
+        let activeFwVersion = vm.state.connectedDevices
+            .first(where: { $0.id == vm.state.activeDeviceId })?.firmwareVersion ?? ""
         ScrollView {
             VStack(spacing: 10) {
                 if !vm.state.connectedDevices.isEmpty {
@@ -74,10 +78,20 @@ public struct MenuTabScreen: View {
                     )
                 }
 
-                Text("App Version 1.0.0")
-                    .font(.system(size: 13))
-                    .foregroundStyle(AppColors.weakText)
-                    .padding(.top, 16)
+                if !activeFwVersion.isEmpty {
+                    Text("Firmware Version \(activeFwVersion)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppColors.weakText)
+                        .padding(.top, 16)
+                    Text("App Version 1.0.0")
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppColors.weakText)
+                } else {
+                    Text("App Version 1.0.0")
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppColors.weakText)
+                        .padding(.top, 16)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
