@@ -183,11 +183,13 @@ public struct MainShellView: View {
     }
 
     private func presentReportShareSheet() {
-        guard let url = vm.shareReportHtml() else {
-            fileImportError = FileImportError(message: "No report available to share.")
-            return
+        Task { @MainActor in
+            guard let url = await vm.shareReportHtml() else {
+                fileImportError = FileImportError(message: "No report available to share.")
+                return
+            }
+            sharePayload = SharePayload(url: url)
         }
-        sharePayload = SharePayload(url: url)
     }
 
     private func presentReportWordShareSheet() {
@@ -199,11 +201,13 @@ public struct MainShellView: View {
     }
 
     private func presentReportImageShareSheet() {
-        guard let url = vm.shareReportImage() else {
-            fileImportError = FileImportError(message: "No report available to share.")
-            return
+        Task { @MainActor in
+            guard let url = await vm.shareReportImage() else {
+                fileImportError = FileImportError(message: "No report available to share.")
+                return
+            }
+            sharePayload = SharePayload(url: url)
         }
-        sharePayload = SharePayload(url: url)
     }
 
     private func presentReportCsvShareSheet() {

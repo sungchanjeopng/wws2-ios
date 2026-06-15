@@ -16,6 +16,7 @@ import Combine
 import SwiftUI
 import UIKit
 import PDFKit
+import WebKit
 import CoreBluetooth
 import WWS2Core
 import WWS2BLE
@@ -1478,27 +1479,42 @@ public final class AppViewModel: ObservableObject {
     /// 현재 리포트를 PDF 로 렌더링해 공유용 URL 을 반환한다. UIPrintPageRenderer
     /// + UIGraphicsPDFRenderer 표준 파이프라인으로 페이지 분할/이미지 임베드를
     /// 자동 처리한다.
-    public func shareReportHtml() -> URL? {
+    @MainActor
+    public func shareReportHtml() async -> URL? {
         guard let data = state.reportData else { return nil }
         let html = ReportHtmlExporter.buildHtml(data)
-
-        let formatter = UIMarkupTextPrintFormatter(markupText: html)
-        let renderer = UIPrintPageRenderer()
-        renderer.addPrintFormatter(formatter, startingAtPageAt: 0)
 
         // A4 portrait at 72 DPI: 595.2 x 841.8 points.
         let pageSize = CGSize(width: 595.2, height: 841.8)
         let pageRect = CGRect(origin: .zero, size: pageSize)
+
+        // Render through an offscreen WKWebView. UIMarkupTextPrintFormatter does
+        // NOT render base64 data: URL images, so the waveform PNGs were silently
+        // dropped from the PDF (only text/tables came through). WKWebView's print
+        // formatter renders the live page, images included.
+        let webView = WKWebView(frame: pageRect)
+        webView.loadHTMLString(html, baseURL: nil)
+        try? await Task.sleep(nanoseconds: 100_000_000) // let navigation start
+        var tries = 0
+        while webView.isLoading && tries < 60 {          // wait up to ~3s for load
+            try? await Task.sleep(nanoseconds: 50_000_000); tries += 1
+        }
+        try? await Task.sleep(nanoseconds: 350_000_000)  // let images decode/paint
+
+        let formatter = webView.viewPrintFormatter()
+        let renderer = UIPrintPageRenderer()
+        renderer.addPrintFormatter(formatter, startingAtPageAt: 0)
         renderer.setValue(NSValue(cgRect: pageRect), forKey: "paperRect")
         renderer.setValue(NSValue(cgRect: pageRect), forKey: "printableRect")
 
         let pdfData = NSMutableData()
         UIGraphicsBeginPDFContextToData(pdfData, pageRect, nil)
-        for i in 0..<renderer.numberOfPages {
+        for i in 0..<max(renderer.numberOfPages, 1) {
             UIGraphicsBeginPDFPage()
             renderer.drawPage(at: i, in: UIGraphicsGetPDFContextBounds())
         }
         UIGraphicsEndPDFContext()
+        _ = webView // keep alive until PDF rendering completes
 
         // Documents/exports = Files 앱(WESSWARE 폴더)에서 보이는 영구 저장 위치
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -1515,8 +1531,9 @@ public final class AppViewModel: ObservableObject {
 
     /// 리포트를 JPG 이미지 한 장으로 저장해 공유용 URL 반환.
     /// (PDF 페이지들을 PDFKit으로 렌더해 세로로 이어 붙임)
-    public func shareReportImage() -> URL? {
-        guard let pdfUrl = shareReportHtml(), let doc = PDFDocument(url: pdfUrl), doc.pageCount > 0 else { return nil }
+    @MainActor
+    public func shareReportImage() async -> URL? {
+        guard let pdfUrl = await shareReportHtml(), let doc = PDFDocument(url: pdfUrl), doc.pageCount > 0 else { return nil }
         let scale: CGFloat = 2
         var pages: [UIImage] = []
         for i in 0..<doc.pageCount {
