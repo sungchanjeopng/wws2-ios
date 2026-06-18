@@ -30,8 +30,9 @@ final class ExportCsvUseCaseTests: XCTestCase {
     }
 
     func testInterfaceCsvHeaderAndRowFormat() {
+        // Interface dst is stored as raw uint16 (cm); 150 cm → 1.50 m in CSV.
         let r = makeRecord(year: 2024, month: 3, day: 15, hour: 14, minute: 25, second: 30,
-                           eeaD: 200, dst: 1.50, temp: -5.5)
+                           eeaD: 200, dst: 150, temp: -5.5)
         let useCase = ExportCsvUseCase(calendar: Self.utc)
         let csv = useCase.buildCsvContent(records: [r], isInterface: true)
         let lines = csv.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)

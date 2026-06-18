@@ -1793,10 +1793,11 @@ public final class AppViewModel: ObservableObject {
                 guard let light = Double(cols[1]),
                       let heavy = Double(cols[2]),
                       let temp = Double(cols[3]) else { return nil }
+                // CSV stores meters; TrendRecord.dst/eeaD store raw uint16 (cm).
                 return TrendRecord(
                     dateTime: date,
                     eeaD: Int((heavy / 0.01).rounded()),
-                    dst: light,
+                    dst: light * 100.0,
                     temperature: temp
                 )
             }

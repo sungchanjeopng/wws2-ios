@@ -170,8 +170,10 @@ public enum FrameParser {
     }
 
     private static func parseInterfaceStatus26B(_ data: [UInt8]) -> ParseResult {
-        let light       = Double(readU16BE(data, 0))  * 0.01
-        let heavy       = Double(readU16BE(data, 2))  * 0.01
+        let lightRaw    = readU16BE(data, 0)
+        let heavyRaw    = readU16BE(data, 2)
+        let light       = Double(lightRaw) * 0.01
+        let heavy       = Double(heavyRaw) * 0.01
         let temperature = Double(readS16BE(data, 4))  * 0.1
         let currentMA   = Double(readU16BE(data, 6))  * 0.01
         // Interface-meter freq index → kHz: 0=380, 1=270, 2=160, 3=130
@@ -208,10 +210,12 @@ public enum FrameParser {
             set4mA: set4mA, set20mA: set20mA, pipeDia: 0, freqMHz: Double(freq) * 0.001,
             heavyLevel: heavy, errorCode: errorCode
         )
+        // TrendRecord.dst/eeaD store raw uint16 (cm) — chart/stats apply *0.01.
+        // Matches TrendRecord.fromBytes (density download path) which keeps raw.
         let trendRecord = TrendRecord(
             dateTime: Date(),
-            eeaD: Int(heavy / 0.01),
-            dst: light,
+            eeaD: Int(heavyRaw),
+            dst: Double(lightRaw),
             temperature: temperature
         )
         return .interfaceStatus(
