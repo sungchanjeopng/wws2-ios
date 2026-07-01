@@ -831,7 +831,7 @@ public final class AppViewModel: ObservableObject {
             state.interfaceDiag = diag
             state.temperatureC = diag.temperature
             state.currentMA = diag.currentMA
-            state.freqMHz = Double(diag.freq) * 0.001
+            state.freqMHz = diag.freqMHz
             state.offset = diag.offset
             state.set4mA = diag.set4mA
             state.set20mA = diag.set20mA

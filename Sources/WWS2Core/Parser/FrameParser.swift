@@ -174,7 +174,7 @@ public enum FrameParser {
         let heavy       = Double(readU16BE(data, 2))  * 0.01
         let temperature = Double(readS16BE(data, 4))  * 0.1
         let currentMA   = Double(readU16BE(data, 6))  * 0.01
-        // Interface-meter freq index → kHz: 0=380, 1=270, 2=160, 3=130
+        // Interface-meter freq index → kHz: 0=380, 1=legacy/reserved 270, 2=160, 3=130, 4=415
         let freqIdx = Int(readU16BE(data, 8))
         let freq: Int = {
             switch freqIdx {
@@ -182,6 +182,7 @@ public enum FrameParser {
             case 1: return 270
             case 2: return 160
             case 3: return 130
+            case 4: return 415
             default: return 0
             }
         }()

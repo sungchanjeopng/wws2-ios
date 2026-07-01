@@ -20,10 +20,12 @@ struct ConfigEdit: Identifiable, Equatable {
     let allowTextInput: Bool
     /// 1 = integer-only, 100 = two decimal digits (raw is value × 100).
     let decimalScale: Int
+    /// Optional finite set for enum-like values. Used to skip legacy/reserved values.
+    let allowedValues: [Int]?
     let formatter: (Int) -> String
 
     init(title: String, cmd: Int, value: Int, min: Int, max: Int, step: Int,
-         allowTextInput: Bool = true, decimalScale: Int = 1,
+         allowTextInput: Bool = true, decimalScale: Int = 1, allowedValues: [Int]? = nil,
          formatter: @escaping (Int) -> String) {
         self.title = title
         self.cmd = cmd
@@ -33,6 +35,7 @@ struct ConfigEdit: Identifiable, Equatable {
         self.step = step
         self.allowTextInput = allowTextInput
         self.decimalScale = decimalScale
+        self.allowedValues = allowedValues
         self.formatter = formatter
     }
 
@@ -118,26 +121,27 @@ private struct InterfaceParametersPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer().frame(height: 8)
 
-            // Freq — picker-style (0..3 → 380/270/160/130 kHz)
+            // Freq — picker-style. 1 is legacy/reserved 270 kHz, so skip it for new selections.
             EditableDiagRow(label: "Freq",
                             value: String(format: "%d kHz", Int((state.freqMHz * 1000).rounded()))) {
                 let kHz = Int((state.freqMHz * 1000).rounded())
                 let current: Int = {
                     switch kHz {
                     case 380: return 0
-                    case 270: return 1
                     case 160: return 2
                     case 130: return 3
-                    default:  return 0
+                    case 415: return 4
+                    default:  return 4
                     }
                 }()
                 onEdit(ConfigEdit(title: "Frequency", cmd: 6, value: current,
-                                  min: 0, max: 3, step: 1, allowTextInput: false) { v in
+                                  min: 0, max: 4, step: 1, allowTextInput: false,
+                                  allowedValues: [0, 2, 3, 4]) { v in
                     switch v {
                     case 0: return "380 kHz"
-                    case 1: return "270 kHz"
                     case 2: return "160 kHz"
                     case 3: return "130 kHz"
+                    case 4: return "415 kHz"
                     default: return "--"
                     }
                 })
@@ -272,7 +276,8 @@ struct ConfigEditSheet: View {
         self.config = config
         self.onApply = onApply
         self.onCancel = onCancel
-        let clamped = Swift.min(Swift.max(config.value, config.min), config.max)
+        let clamped = Self.normalizeAllowed(config.value, min: config.min, max: config.max,
+                                            allowedValues: config.allowedValues)
         _stepperValue = State(initialValue: clamped)
         _intText      = State(initialValue: Self.integerText(raw: clamped, scale: config.decimalScale))
         _fracText     = State(initialValue: Self.fractionText(raw: clamped, scale: config.decimalScale))
@@ -292,6 +297,23 @@ struct ConfigEditSheet: View {
         return String(format: "%02d", frac)
     }
 
+    private static func normalizeAllowed(_ raw: Int, min: Int, max: Int,
+                                         allowedValues: [Int]?, reference: Int? = nil) -> Int {
+        let bounded = Swift.min(Swift.max(raw, min), max)
+        guard let allowedValues else { return bounded }
+        let allowed = allowedValues.filter { $0 >= min && $0 <= max }.sorted()
+        guard !allowed.isEmpty else { return bounded }
+        if allowed.contains(bounded) { return bounded }
+        let pivot = reference ?? bounded
+        if raw > pivot {
+            return allowed.first(where: { $0 > pivot }) ?? allowed.first!
+        }
+        if raw < pivot {
+            return allowed.last(where: { $0 < pivot }) ?? allowed.last!
+        }
+        return allowed.min(by: { abs($0 - bounded) < abs($1 - bounded) }) ?? allowed.first!
+    }
+
     private func parseRaw() -> Int? {
         if config.decimalScale <= 1 {
             return Int(intText)
@@ -307,11 +329,15 @@ struct ConfigEditSheet: View {
     private var parsedValue: Int? {
         let raw = config.allowTextInput ? parseRaw() : stepperValue
         guard let r = raw else { return nil }
-        return (r >= config.min && r <= config.max) ? r : nil
+        guard r >= config.min && r <= config.max else { return nil }
+        if let allowed = config.allowedValues, !allowed.contains(r) { return nil }
+        return r
     }
 
     private func setValue(_ newValue: Int) {
-        let clamped = Swift.min(Swift.max(newValue, config.min), config.max)
+        let clamped = Self.normalizeAllowed(newValue, min: config.min, max: config.max,
+                                            allowedValues: config.allowedValues,
+                                            reference: stepperValue)
         stepperValue = clamped
         intText  = Self.integerText(raw: clamped, scale: config.decimalScale)
         fracText = Self.fractionText(raw: clamped, scale: config.decimalScale)

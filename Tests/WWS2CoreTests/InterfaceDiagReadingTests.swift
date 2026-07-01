@@ -28,7 +28,8 @@ final class InterfaceDiagReadingTests: XCTestCase {
         XCTAssertEqual(r.temperature, 25.0, accuracy: 1e-9)
         XCTAssertEqual(r.currentMA, 8.0, accuracy: 1e-9)
         XCTAssertEqual(r.freq, 1)
-        XCTAssertEqual(r.freqLabel, "160K")
+        XCTAssertEqual(r.freqLabel, "270K")
+        XCTAssertEqual(r.freqMHz, 0.270, accuracy: 1e-9)
         XCTAssertEqual(r.offset, -1.0, accuracy: 1e-9)   // signed!
         XCTAssertEqual(r.set4mA, 0.5, accuracy: 1e-9)
         XCTAssertEqual(r.set20mA, 10.0, accuracy: 1e-9)
@@ -47,7 +48,7 @@ final class InterfaceDiagReadingTests: XCTestCase {
 
     func testFreqLabels() {
         let labels: [(Int, String)] = [
-            (0, "130K"), (1, "160K"), (2, "270K"), (3, "380K"), (4, "--"), (-1, "--")
+            (0, "380K"), (1, "270K"), (2, "160K"), (3, "130K"), (4, "415K"), (-1, "--")
         ]
         for (f, expected) in labels {
             let r = InterfaceDiagReading(
@@ -55,6 +56,8 @@ final class InterfaceDiagReadingTests: XCTestCase {
                 set4mA: 0, set20mA: 0, tvg: 0, damp: 0, asf: 0, relayOn: false
             )
             XCTAssertEqual(r.freqLabel, expected, "freq=\(f)")
+            let expectedMHz = expected == "--" ? 0.0 : Double(expected.dropLast())! * 0.001
+            XCTAssertEqual(r.freqMHz, expectedMHz, accuracy: 1e-9, "freq=\(f)")
         }
     }
 

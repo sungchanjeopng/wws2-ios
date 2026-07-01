@@ -172,7 +172,7 @@ final class FrameParserTests: XCTestCase {
 
     func testInterfaceFreqIndexMappings() {
         let mappings: [(UInt16, Double)] = [
-            (0, 0.380), (1, 0.270), (2, 0.160), (3, 0.130), (99, 0.000)
+            (0, 0.380), (1, 0.270), (2, 0.160), (3, 0.130), (4, 0.415), (99, 0.000)
         ]
         for (idx, expectedMHz) in mappings {
             var bytes: [UInt8] = []

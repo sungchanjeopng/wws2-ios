@@ -6,7 +6,7 @@
 //
 //   [0..1]   rawTemp    (S16)  x0.1 °C
 //   [2..3]   rawCurrent (U16)  x0.01 mA
-//   [4..5]   rawFreq    (U16)  enum (0=130K, 1=160K, 2=270K, 3=380K)
+//   [4..5]   rawFreq    (U16)  enum (0=380K, 1=270K legacy/reserved, 2=160K, 3=130K, 4=415K)
 //   [6..7]   rawOffset  (S16)  x0.01 m
 //   [8..9]   raw4mA     (U16)  x0.01
 //   [10..11] raw20mA    (U16)  x0.01
@@ -54,14 +54,24 @@ public struct InterfaceDiagReading: Equatable, Hashable, Sendable {
         self.relayOn = relayOn
     }
 
-    public var freqLabel: String {
+    public var freqKHz: Int? {
         switch freq {
-        case 0: return "130K"
-        case 1: return "160K"
-        case 2: return "270K"
-        case 3: return "380K"
-        default: return "--"
+        case 0: return 380
+        case 1: return 270
+        case 2: return 160
+        case 3: return 130
+        case 4: return 415
+        default: return nil
         }
+    }
+
+    public var freqMHz: Double {
+        Double(freqKHz ?? 0) * 0.001
+    }
+
+    public var freqLabel: String {
+        guard let freqKHz else { return "--" }
+        return "\(freqKHz)K"
     }
 
     public static func fromBytes(_ data: [UInt8]) -> InterfaceDiagReading? {
